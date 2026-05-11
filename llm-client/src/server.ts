@@ -9,21 +9,17 @@ export type ServerHandle = {
   stop: () => Promise<void>;
 };
 
+export type RequestHandler = (req: Request) => Promise<Response> | Response;
+
 export async function startServer(
   opts: ServerOptions,
+  handler: RequestHandler,
 ): Promise<ServerHandle> {
   const server = Bun.serve({
     port: opts.port,
     hostname: opts.hostname,
-    fetch(req) {
-      const url = new URL(req.url);
-      if (req.method === "GET" && url.pathname === "/healthz") {
-        return new Response("ok", { status: 200 });
-      }
-      return new Response("not found", { status: 404 });
-    },
+    fetch: handler,
   });
-
   if (server.port === undefined) {
     throw new Error("server.port unexpectedly undefined (unix socket?)");
   }

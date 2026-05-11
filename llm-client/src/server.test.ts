@@ -8,16 +8,30 @@ afterEach(async () => {
   handle = undefined;
 });
 
-test("GET /healthz returns 200 ok", async () => {
-  handle = await startServer({ port: 0, hostname: "127.0.0.1" });
+test("startServer delegates fetch to the provided handler", async () => {
+  handle = await startServer(
+    { port: 0, hostname: "127.0.0.1" },
+    async (req) => new Response(`echo: ${new URL(req.url).pathname}`, { status: 200 }),
+  );
 
-  const res = await fetch(`http://127.0.0.1:${handle.port}/healthz`);
-
+  const res = await fetch(`http://127.0.0.1:${handle.port}/anything`);
   expect(res.status).toBe(200);
-  expect(await res.text()).toBe("ok");
+  expect(await res.text()).toBe("echo: /anything");
 });
 
-test("server binds to 127.0.0.1 only (not 0.0.0.0)", async () => {
-  handle = await startServer({ port: 0, hostname: "127.0.0.1" });
+test("server binds to the requested hostname", async () => {
+  handle = await startServer(
+    { port: 0, hostname: "127.0.0.1" },
+    () => new Response("ok"),
+  );
   expect(handle.hostname).toBe("127.0.0.1");
+});
+
+test("server.stop is idempotent", async () => {
+  handle = await startServer(
+    { port: 0, hostname: "127.0.0.1" },
+    () => new Response("ok"),
+  );
+  await handle.stop();
+  await handle.stop();
 });
