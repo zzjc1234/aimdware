@@ -1,18 +1,8 @@
-import type { IngestQueue } from "./queue";
-import {
-  postContext,
-  type IngestBody,
-  type PostContextOpts,
-  type PostContextResult,
-} from "./ingest";
+import type { IngestQueue, RecordState } from "./queue";
+import type { IngestBody } from "./ingest";
 
 export const DEFAULT_BACKOFF: number[] = [
-  1_000,        // attempt 1: 1s
-  5_000,        // attempt 2: 5s
-  30_000,       // attempt 3: 30s
-  5 * 60_000,   // attempt 4: 5m
-  30 * 60_000,  // attempt 5: 30m
-  60 * 60_000,  // attempt 6+: 1h (cap)
+  1_000, 5_000, 30_000, 5 * 60_000, 30 * 60_000, 60 * 60_000,
 ];
 
 export function nextBackoff(
@@ -23,85 +13,122 @@ export function nextBackoff(
   return schedule[i] ?? schedule[schedule.length - 1]!;
 }
 
-export type PostContextImpl = (
-  backendUrl: string,
-  studentToken: string,
-  body: IngestBody,
-  opts?: PostContextOpts,
-) => Promise<PostContextResult>;
+/**
+ * Uniform return shape from each stage handler. The worker translates this
+ * into a queue transition, so handlers don't need to know about queue state.
+ */
+export type StageResult =
+  | { kind: "advance" }
+  | { kind: "retry"; reason: string }
+  | { kind: "terminal"; finalState: "conflict" | "fatal"; reason: string };
+
+export type StageHandler = (body: IngestBody) => Promise<StageResult>;
+
+export type Stages = {
+  ingest: StageHandler;   // called on state=captured
+  sync: StageHandler;     // called on state=ingested
+  confirm: StageHandler;  // called on state=synced
+};
 
 export type WorkerOpts = {
   queue: IngestQueue;
-  backendUrl: string;
-  studentToken: string;
+  stages: Stages;
   now?: () => number;
-  postContextImpl?: PostContextImpl;
   backoff?: number[];
+  concurrency?: number;
 };
 
 export type RunSummary = {
   processed: number;
-  created: number;
-  exists: number;
-  conflict: number;
-  fatal: number;
+  advance: number;
   retry: number;
+  terminal: number;
 };
+
+function stageFor(state: RecordState, stages: Stages): StageHandler | undefined {
+  switch (state) {
+    case "captured": return stages.ingest;
+    case "ingested": return stages.sync;
+    case "synced":   return stages.confirm;
+    default:         return undefined;
+  }
+}
+
+function nextStateAfter(state: RecordState): RecordState {
+  switch (state) {
+    case "captured": return "ingested";
+    case "ingested": return "synced";
+    case "synced":   return "done";
+    default:         return state;
+  }
+}
 
 export async function runOnce(
   opts: WorkerOpts,
   limit = 50,
 ): Promise<RunSummary> {
   const now = (opts.now ?? Date.now)();
-  const post: PostContextImpl = opts.postContextImpl ?? postContext;
+  const concurrency = opts.concurrency ?? 4;
   const backoff = opts.backoff ?? DEFAULT_BACKOFF;
 
   const ready = opts.queue.pickReady(now, limit);
+
   const summary: RunSummary = {
-    processed: 0,
-    created: 0,
-    exists: 0,
-    conflict: 0,
-    fatal: 0,
+    processed: ready.length,
+    advance: 0,
     retry: 0,
+    terminal: 0,
   };
 
-  for (const body of ready) {
-    summary.processed += 1;
-    const result = await post(opts.backendUrl, opts.studentToken, body);
-    switch (result.kind) {
-      case "created":
-        opts.queue.markSent(body.record_id, "created");
-        summary.created += 1;
-        break;
-      case "exists":
-        opts.queue.markSent(body.record_id, "exists");
-        summary.exists += 1;
-        break;
-      case "conflict":
-        opts.queue.markTerminal(body.record_id, "conflict", "body mismatch");
-        summary.conflict += 1;
-        break;
-      case "fatal":
-        opts.queue.markTerminal(
-          body.record_id,
-          "fatal",
-          `status=${result.status}: ${result.reason}`,
-        );
-        summary.fatal += 1;
-        break;
-      case "retryable": {
-        const prev = opts.queue.statusOf(body.record_id);
-        const attempts = prev?.attempts ?? 0;
-        const delay = nextBackoff(attempts, backoff);
-        opts.queue.markRetry(body.record_id, result.reason, now + delay);
-        summary.retry += 1;
-        break;
+  // Bound concurrency. Records inside the batch run in parallel up to `concurrency`.
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, ready.length) }, async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= ready.length) return;
+      const slot = ready[i]!;
+      const handler = stageFor(slot.state, opts.stages);
+      if (!handler) continue;
+      let result: StageResult;
+      try {
+        result = await handler(slot.body);
+      } catch (e) {
+        result = { kind: "retry", reason: (e as Error).message ?? "handler threw" };
       }
+      applyResult(opts.queue, slot.body.record_id, slot.state, result, now, backoff);
+      if (result.kind === "advance") summary.advance += 1;
+      else if (result.kind === "retry") summary.retry += 1;
+      else summary.terminal += 1;
     }
-  }
+  });
+  await Promise.all(workers);
 
   return summary;
+}
+
+function applyResult(
+  queue: IngestQueue,
+  recordId: string,
+  currentState: RecordState,
+  result: StageResult,
+  now: number,
+  backoff: number[],
+): void {
+  switch (result.kind) {
+    case "advance": {
+      queue.advance(recordId, nextStateAfter(currentState), now);
+      break;
+    }
+    case "retry": {
+      const attempts = queue.statusOf(recordId)?.attempts ?? 0;
+      queue.markRetry(recordId, result.reason, now + nextBackoff(attempts, backoff));
+      break;
+    }
+    case "terminal": {
+      queue.markTerminal(recordId, result.finalState, result.reason);
+      break;
+    }
+  }
 }
 
 export type WorkerLoopHandle = { stop: () => Promise<void> };
@@ -116,12 +143,11 @@ export function startWorkerLoop(
       try {
         await runOnce(opts);
       } catch (e) {
-        console.error("ingest worker tick failed:", (e as Error).message);
+        console.error("worker tick failed:", (e as Error).message);
       }
       await Bun.sleep(pollMs);
     }
   })();
-
   return {
     async stop() {
       stopped = true;

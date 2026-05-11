@@ -1,18 +1,45 @@
 import { Database } from "bun:sqlite";
 import type { IngestBody } from "./ingest";
 
-export type QueueState = "pending" | "sent" | "conflict" | "fatal";
+/**
+ * Per-record lifecycle.
+ *
+ *   captured -> ingested -> synced -> done
+ *
+ * At each non-terminal state the worker performs ONE action:
+ *   captured   : POST /ingest/context
+ *   ingested   : WebDAV PUT blob to Tbox
+ *   synced     : POST /ingest/context/{id}/uploaded
+ *
+ * Terminal failures:
+ *   conflict   : ingest got 409 (body mismatch)
+ *   fatal      : non-retryable 4xx (auth, schema, etc.)
+ */
+export type RecordState =
+  | "captured"
+  | "ingested"
+  | "synced"
+  | "done"
+  | "conflict"
+  | "fatal";
+
+export const ACTIVE_STATES: RecordState[] = ["captured", "ingested", "synced"];
 
 export type QueueStatus = {
   record_id: string;
-  state: QueueState;
+  state: RecordState;
   attempts: number;
   next_attempt_at: number;
   last_error: string | null;
 };
 
+export type ReadyRecord = {
+  body: IngestBody;
+  state: RecordState;
+};
+
 const SCHEMA = `
-  CREATE TABLE IF NOT EXISTS ingest_queue (
+  CREATE TABLE IF NOT EXISTS outbox (
     record_id        TEXT PRIMARY KEY,
     body_json        TEXT NOT NULL,
     state            TEXT NOT NULL,
@@ -21,8 +48,8 @@ const SCHEMA = `
     last_error       TEXT,
     created_at       INTEGER NOT NULL
   );
-  CREATE INDEX IF NOT EXISTS ix_pending_ready
-    ON ingest_queue (state, next_attempt_at);
+  CREATE INDEX IF NOT EXISTS ix_outbox_active
+    ON outbox (state, next_attempt_at);
 `;
 
 export class IngestQueue {
@@ -37,43 +64,50 @@ export class IngestQueue {
   enqueue(body: IngestBody, nextAttemptAt: number): void {
     this.db
       .prepare(
-        `INSERT OR IGNORE INTO ingest_queue
+        `INSERT OR IGNORE INTO outbox
            (record_id, body_json, state, attempts, next_attempt_at, created_at)
-         VALUES (?, ?, 'pending', 0, ?, ?)`,
+         VALUES (?, ?, 'captured', 0, ?, ?)`,
       )
-      .run(
-        body.record_id,
-        JSON.stringify(body),
-        nextAttemptAt,
-        Date.now(),
-      );
+      .run(body.record_id, JSON.stringify(body), nextAttemptAt, Date.now());
   }
 
-  pickReady(now: number, limit: number): IngestBody[] {
+  pickReady(now: number, limit: number): ReadyRecord[] {
+    const placeholders = ACTIVE_STATES.map(() => "?").join(",");
     const rows = this.db
       .prepare(
-        `SELECT body_json FROM ingest_queue
-         WHERE state = 'pending' AND next_attempt_at <= ?
+        `SELECT body_json, state FROM outbox
+         WHERE state IN (${placeholders}) AND next_attempt_at <= ?
          ORDER BY next_attempt_at ASC, created_at ASC
          LIMIT ?`,
       )
-      .all(now, limit) as { body_json: string }[];
-    return rows.map((r) => JSON.parse(r.body_json) as IngestBody);
+      .all(...ACTIVE_STATES, now, limit) as Array<{ body_json: string; state: RecordState }>;
+    return rows.map((r) => ({
+      body: JSON.parse(r.body_json) as IngestBody,
+      state: r.state,
+    }));
   }
 
-  markSent(record_id: string, _kind: "created" | "exists"): void {
+  /**
+   * Advance to the next state on success. Resets attempts + clears error.
+   */
+  advance(record_id: string, newState: RecordState, nextAttemptAt: number): void {
     this.db
       .prepare(
-        `UPDATE ingest_queue SET state = 'sent', last_error = NULL
+        `UPDATE outbox
+         SET state = ?, attempts = 0, next_attempt_at = ?, last_error = NULL
          WHERE record_id = ?`,
       )
-      .run(record_id);
+      .run(newState, nextAttemptAt, record_id);
   }
 
+  /**
+   * Retry the current stage. Increments attempts, sets next_attempt_at,
+   * records error. State unchanged.
+   */
   markRetry(record_id: string, error: string, nextAttemptAt: number): void {
     this.db
       .prepare(
-        `UPDATE ingest_queue
+        `UPDATE outbox
          SET attempts = attempts + 1,
              next_attempt_at = ?,
              last_error = ?
@@ -82,6 +116,9 @@ export class IngestQueue {
       .run(nextAttemptAt, error, record_id);
   }
 
+  /**
+   * Terminal failure (conflict | fatal). No further work attempted.
+   */
   markTerminal(
     record_id: string,
     finalState: "conflict" | "fatal",
@@ -89,7 +126,7 @@ export class IngestQueue {
   ): void {
     this.db
       .prepare(
-        `UPDATE ingest_queue
+        `UPDATE outbox
          SET state = ?, last_error = ?
          WHERE record_id = ?`,
       )
@@ -100,7 +137,7 @@ export class IngestQueue {
     const row = this.db
       .prepare(
         `SELECT record_id, state, attempts, next_attempt_at, last_error
-         FROM ingest_queue WHERE record_id = ?`,
+         FROM outbox WHERE record_id = ?`,
       )
       .get(record_id) as QueueStatus | null;
     return row ?? undefined;

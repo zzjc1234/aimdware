@@ -7,7 +7,10 @@ import { loadConfig, type Config } from "./config";
 import { createHandler } from "./handler";
 import { startServer } from "./server";
 import { IngestQueue } from "./queue";
-import { startWorkerLoop } from "./ingest-worker";
+import { startWorkerLoop, type Stages, type StageHandler } from "./ingest-worker";
+import { postContext, confirmUploaded, type IngestBody } from "./ingest";
+import { syncBlob, makeWebDAVPut, type WebDAVPutLike } from "./sync";
+import { writeAtomic, bytesToHex } from "./util";
 import type { CaptureResult } from "./capture";
 
 const ROUTER_VERSION = "0.0.0";
@@ -16,11 +19,7 @@ function expandHome(p: string): string {
   return p.startsWith("~/") || p === "~" ? join(homedir(), p.slice(1)) : p;
 }
 
-function bytesToHex(b: Uint8Array): string {
-  return Buffer.from(b).toString("hex");
-}
-
-function buildIngestBody(config: Config, r: CaptureResult) {
+function buildIngestBody(config: Config, r: CaptureResult): IngestBody {
   return {
     record_id: r.record_id,
     course_code: config.course,
@@ -29,10 +28,70 @@ function buildIngestBody(config: Config, r: CaptureResult) {
     blob_size: r.blob_size,
     ts: r.ts.toISOString(),
     router_version: ROUTER_VERSION,
-    client_meta: {
-      upstream_type: config.upstream.type,
-    },
+    client_meta: { upstream_type: config.upstream.type },
   };
+}
+
+function buildStages(
+  config: Config,
+  cacheDir: string,
+  webdavPut: WebDAVPutLike,
+): Stages {
+  const ingest: StageHandler = async (body) => {
+    const r = await postContext(config.backend_url, config.student_token, body);
+    switch (r.kind) {
+      case "created":
+      case "exists":
+        return { kind: "advance" };
+      case "conflict":
+        return { kind: "terminal", finalState: "conflict", reason: "body mismatch" };
+      case "fatal":
+        return { kind: "terminal", finalState: "fatal", reason: r.reason };
+      case "retryable":
+        return { kind: "retry", reason: r.reason };
+    }
+  };
+
+  const sync: StageHandler = async (body) => {
+    const path = join(cacheDir, "records", `${body.record_id}.json`);
+    let data: Uint8Array;
+    try {
+      data = new Uint8Array(await Bun.file(path).arrayBuffer());
+    } catch (e) {
+      return {
+        kind: "terminal",
+        finalState: "fatal",
+        reason: `cache file missing: ${(e as Error).message}`,
+      };
+    }
+    const r = await syncBlob(webdavPut, "/" + body.blob_uri, data);
+    switch (r.kind) {
+      case "synced":
+        return { kind: "advance" };
+      case "fatal":
+        return { kind: "terminal", finalState: "fatal", reason: r.reason };
+      case "retryable":
+        return { kind: "retry", reason: r.reason };
+    }
+  };
+
+  const confirm: StageHandler = async (body) => {
+    const r = await confirmUploaded(
+      config.backend_url,
+      config.student_token,
+      body.record_id,
+    );
+    switch (r.kind) {
+      case "ok":
+        return { kind: "advance" };
+      case "fatal":
+        return { kind: "terminal", finalState: "fatal", reason: r.reason };
+      case "retryable":
+        return { kind: "retry", reason: r.reason };
+    }
+  };
+
+  return { ingest, sync, confirm };
 }
 
 async function main() {
@@ -61,17 +120,29 @@ async function main() {
 
   const config = loadConfig(yamlText);
   const cacheDir = expandHome(config.local_cache_dir);
-  await mkdir(cacheDir, { recursive: true });
+  const recordsDir = join(cacheDir, "records");
+  await mkdir(recordsDir, { recursive: true });
   const queueDb = join(cacheDir, "queue.db");
 
   const queue = new IngestQueue(queueDb);
+  const webdavPut = makeWebDAVPut(config.tbox_url);
 
   const handler = createHandler({
     upstream: {
       base_url: config.upstream.base_url,
       api_key: config.upstream.api_key,
     },
-    onCapture: (result) => {
+    onCapture: async (result) => {
+      const blobPath = join(recordsDir, `${result.record_id}.json`);
+      try {
+        await writeAtomic(blobPath, result.blob_bytes);
+      } catch (e) {
+        console.error(
+          `cache write failed for ${result.record_id}:`,
+          (e as Error).message,
+        );
+        return; // don't enqueue if we can't preserve the blob
+      }
       const body = buildIngestBody(config, result);
       queue.enqueue(body, Date.now());
       const hex = bytesToHex(result.blob_hash).slice(0, 16);
@@ -89,8 +160,8 @@ async function main() {
   const worker = startWorkerLoop(
     {
       queue,
-      backendUrl: config.backend_url,
-      studentToken: config.student_token,
+      stages: buildStages(config, cacheDir, webdavPut),
+      concurrency: 4,
     },
     1000,
   );
@@ -101,6 +172,7 @@ async function main() {
   console.log(`  upstream:    ${config.upstream.base_url} (${config.upstream.type})`);
   console.log(`  course:      ${config.course}`);
   console.log(`  backend:     ${config.backend_url}`);
+  console.log(`  tbox:        ${config.tbox_url}`);
   console.log(`  cache:       ${cacheDir}`);
 
   const shutdown = async (signal: string) => {

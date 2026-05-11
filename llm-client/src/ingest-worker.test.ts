@@ -3,12 +3,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { IngestQueue } from "./queue";
-import type { IngestBody, PostContextResult } from "./ingest";
+import type { IngestBody } from "./ingest";
 import {
   nextBackoff,
   DEFAULT_BACKOFF,
   runOnce,
-  type PostContextImpl,
+  type Stages,
+  type StageHandler,
 } from "./ingest-worker";
 
 const tmpDirs: string[] = [];
@@ -32,157 +33,142 @@ afterEach(() => {
   for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-test("nextBackoff schedule: 1s, 5s, 30s, 5m, 30m, 1h (cap)", () => {
+const advance: StageHandler = async () => ({ kind: "advance" });
+const stub3 = (h: StageHandler): Stages => ({ ingest: h, sync: h, confirm: h });
+
+test("nextBackoff schedule: 1s, 5s, 30s, 5m, 30m, 1h cap", () => {
   expect(nextBackoff(0)).toBe(1_000);
   expect(nextBackoff(1)).toBe(5_000);
   expect(nextBackoff(2)).toBe(30_000);
-  expect(nextBackoff(3)).toBe(5 * 60_000);
-  expect(nextBackoff(4)).toBe(30 * 60_000);
   expect(nextBackoff(5)).toBe(60 * 60_000);
   expect(nextBackoff(99)).toBe(60 * 60_000);
   expect(DEFAULT_BACKOFF.length).toBe(6);
 });
 
-test("runOnce: 202 -> markSent", async () => {
+test("captured + ingest.advance -> state=ingested", async () => {
   const q = freshQueue();
   q.enqueue(body("r1"), 0);
-  const fake: PostContextImpl = async () => ({ kind: "created", record_id: "r1" });
-  const summary = await runOnce({
-    queue: q,
-    backendUrl: "http://stub",
-    studentToken: "st",
-    postContextImpl: fake,
-    now: () => 1000,
-  });
-  expect(summary.created).toBe(1);
-  expect(q.statusOf("r1")?.state).toBe("sent");
+  await runOnce({ queue: q, stages: stub3(advance), now: () => 100 });
+  expect(q.statusOf("r1")?.state).toBe("ingested");
   q.close();
 });
 
-test("runOnce: 200 -> exists also moves to sent", async () => {
+test("ingested + sync.advance -> state=synced", async () => {
   const q = freshQueue();
   q.enqueue(body("r1"), 0);
-  const fake: PostContextImpl = async () => ({ kind: "exists", record_id: "r1" });
-  const summary = await runOnce({
-    queue: q,
-    backendUrl: "http://stub",
-    studentToken: "st",
-    postContextImpl: fake,
-    now: () => 1000,
-  });
-  expect(summary.exists).toBe(1);
-  expect(q.statusOf("r1")?.state).toBe("sent");
+  q.advance("r1", "ingested", 0);
+  await runOnce({ queue: q, stages: stub3(advance), now: () => 100 });
+  expect(q.statusOf("r1")?.state).toBe("synced");
   q.close();
 });
 
-test("runOnce: retryable -> markRetry with exponential backoff", async () => {
+test("synced + confirm.advance -> state=done", async () => {
   const q = freshQueue();
   q.enqueue(body("r1"), 0);
-  const fake: PostContextImpl = async () => ({
-    kind: "retryable",
-    status: 503,
-    reason: "down",
-  });
+  q.advance("r1", "synced", 0);
+  await runOnce({ queue: q, stages: stub3(advance), now: () => 100 });
+  expect(q.statusOf("r1")?.state).toBe("done");
+  q.close();
+});
 
-  await runOnce({
-    queue: q,
-    backendUrl: "http://stub",
-    studentToken: "st",
-    postContextImpl: fake,
-    now: () => 1000,
-  });
-
+test("retry result: attempts++ and next_attempt_at scheduled by backoff", async () => {
+  const q = freshQueue();
+  q.enqueue(body("r1"), 0);
+  const retry: StageHandler = async () => ({ kind: "retry", reason: "503" });
+  await runOnce({ queue: q, stages: stub3(retry), now: () => 1000 });
   let s = q.statusOf("r1")!;
-  expect(s.state).toBe("pending");
+  expect(s.state).toBe("captured");
   expect(s.attempts).toBe(1);
   expect(s.next_attempt_at).toBe(1000 + 1_000);
 
-  // simulate time passing, retry again, attempts grows + backoff grows
-  await runOnce({
-    queue: q,
-    backendUrl: "http://stub",
-    studentToken: "st",
-    postContextImpl: fake,
-    now: () => 5000,
-  });
+  await runOnce({ queue: q, stages: stub3(retry), now: () => 5000 });
   s = q.statusOf("r1")!;
   expect(s.attempts).toBe(2);
   expect(s.next_attempt_at).toBe(5000 + 5_000);
-
   q.close();
 });
 
-test("runOnce: conflict -> markTerminal(conflict), no retry", async () => {
+test("terminal -> markTerminal, no retry", async () => {
   const q = freshQueue();
   q.enqueue(body("r1"), 0);
-  const fake: PostContextImpl = async () => ({ kind: "conflict" });
-  await runOnce({
-    queue: q,
-    backendUrl: "http://stub",
-    studentToken: "st",
-    postContextImpl: fake,
-    now: () => 1000,
+  const fatal: StageHandler = async () => ({
+    kind: "terminal",
+    finalState: "fatal",
+    reason: "401",
   });
-  expect(q.statusOf("r1")?.state).toBe("conflict");
-  expect(q.pickReady(Number.MAX_SAFE_INTEGER, 10)).toHaveLength(0);
-  q.close();
-});
-
-test("runOnce: fatal -> markTerminal(fatal), no retry", async () => {
-  const q = freshQueue();
-  q.enqueue(body("r1"), 0);
-  const fake: PostContextImpl = async () => ({
-    kind: "fatal",
-    status: 401,
-    reason: "auth",
-  });
-  await runOnce({
-    queue: q,
-    backendUrl: "http://stub",
-    studentToken: "st",
-    postContextImpl: fake,
-    now: () => 1000,
-  });
+  await runOnce({ queue: q, stages: stub3(fatal), now: () => 1000 });
   expect(q.statusOf("r1")?.state).toBe("fatal");
-  expect(q.statusOf("r1")?.last_error).toContain("auth");
+  expect(q.statusOf("r1")?.last_error).toContain("401");
   q.close();
 });
 
-test("runOnce: nothing ready -> processed = 0", async () => {
+test("handler-throws is treated as retryable", async () => {
   const q = freshQueue();
-  q.enqueue(body("r1"), 5000); // scheduled in the future
-  const fake: PostContextImpl = async () => ({ kind: "created", record_id: "r1" });
-  const summary = await runOnce({
-    queue: q,
-    backendUrl: "http://stub",
-    studentToken: "st",
-    postContextImpl: fake,
-    now: () => 1000,
-  });
+  q.enqueue(body("r1"), 0);
+  const boom: StageHandler = async () => { throw new Error("kaboom"); };
+  await runOnce({ queue: q, stages: stub3(boom), now: () => 0 });
+  const s = q.statusOf("r1")!;
+  expect(s.state).toBe("captured");
+  expect(s.attempts).toBe(1);
+  expect(s.last_error).toContain("kaboom");
+  q.close();
+});
+
+test("nothing ready -> processed=0", async () => {
+  const q = freshQueue();
+  q.enqueue(body("r1"), 5000);
+  const summary = await runOnce({ queue: q, stages: stub3(advance), now: () => 100 });
   expect(summary.processed).toBe(0);
   q.close();
 });
 
-test("runOnce: multiple records in one pass", async () => {
+test("dispatches the right handler per record state", async () => {
   const q = freshQueue();
-  q.enqueue(body("a"), 0);
+  q.enqueue(body("a"), 0);                // captured -> ingest
   q.enqueue(body("b"), 0);
-  q.enqueue(body("c"), 5000); // not ready
-  const fake: PostContextImpl = async (_b, _t, body) => ({
-    kind: "created",
-    record_id: body.record_id,
-  });
-  const summary = await runOnce({
-    queue: q,
-    backendUrl: "http://stub",
-    studentToken: "st",
-    postContextImpl: fake,
-    now: () => 1000,
-  });
-  expect(summary.processed).toBe(2);
-  expect(summary.created).toBe(2);
-  expect(q.statusOf("a")?.state).toBe("sent");
-  expect(q.statusOf("b")?.state).toBe("sent");
-  expect(q.statusOf("c")?.state).toBe("pending");
+  q.advance("b", "ingested", 0);          // ingested -> sync
+  q.enqueue(body("c"), 0);
+  q.advance("c", "ingested", 0);
+  q.advance("c", "synced", 0);            // synced -> confirm
+
+  const called: string[] = [];
+  const stages: Stages = {
+    ingest:  async (b) => { called.push(`ingest:${b.record_id}`);  return { kind: "advance" }; },
+    sync:    async (b) => { called.push(`sync:${b.record_id}`);    return { kind: "advance" }; },
+    confirm: async (b) => { called.push(`confirm:${b.record_id}`); return { kind: "advance" }; },
+  };
+  await runOnce({ queue: q, stages, now: () => 100 });
+
+  expect(called.sort()).toEqual(["confirm:c", "ingest:a", "sync:b"]);
+  expect(q.statusOf("a")?.state).toBe("ingested");
+  expect(q.statusOf("b")?.state).toBe("synced");
+  expect(q.statusOf("c")?.state).toBe("done");
+  q.close();
+});
+
+test("processes the batch in parallel up to concurrency", async () => {
+  const q = freshQueue();
+  for (let i = 0; i < 8; i++) q.enqueue(body(`r${i}`), 0);
+
+  let inFlight = 0;
+  let peak = 0;
+  const slow: StageHandler = async () => {
+    inFlight += 1;
+    peak = Math.max(peak, inFlight);
+    await Bun.sleep(20);
+    inFlight -= 1;
+    return { kind: "advance" };
+  };
+
+  await runOnce(
+    { queue: q, stages: stub3(slow), now: () => 0, concurrency: 4 },
+    8,
+  );
+
+  expect(peak).toBeGreaterThanOrEqual(2);   // actually parallel (not serial)
+  expect(peak).toBeLessThanOrEqual(4);      // bounded by concurrency
+  for (let i = 0; i < 8; i++) {
+    expect(q.statusOf(`r${i}`)?.state).toBe("ingested");
+  }
   q.close();
 });

@@ -113,3 +113,43 @@ test("network error -> retryable", async () => {
   );
   expect(r.kind).toBe("retryable");
 });
+
+// -------- confirmUploaded --------
+import { confirmUploaded } from "./ingest";
+
+test("confirmUploaded POSTs to /ingest/context/{id}/uploaded with bearer auth", async () => {
+  const url = startFakeBackend(202);
+  await confirmUploaded(url, "st_alpha", "abc-123");
+  expect(lastReq!.url).toBe(`${url}/ingest/context/abc-123/uploaded`);
+  expect(lastReq!.auth).toBe("Bearer st_alpha");
+});
+
+test("confirmUploaded: 200 / 202 -> ok", async () => {
+  for (const status of [200, 202]) {
+    const url = startFakeBackend(status);
+    const r = await confirmUploaded(url, "st_x", "id");
+    expect(r.kind).toBe("ok");
+    await fakeBackend?.stop(true);
+    fakeBackend = undefined;
+  }
+});
+
+test("confirmUploaded: 5xx / 429 -> retryable; 4xx -> fatal", async () => {
+  for (const status of [500, 503, 429]) {
+    const url = startFakeBackend(status);
+    expect((await confirmUploaded(url, "st_x", "id")).kind).toBe("retryable");
+    await fakeBackend?.stop(true);
+    fakeBackend = undefined;
+  }
+  for (const status of [400, 401, 404]) {
+    const url = startFakeBackend(status);
+    expect((await confirmUploaded(url, "st_x", "id")).kind).toBe("fatal");
+    await fakeBackend?.stop(true);
+    fakeBackend = undefined;
+  }
+});
+
+test("confirmUploaded network error -> retryable", async () => {
+  const r = await confirmUploaded("http://127.0.0.1:1", "st_x", "id");
+  expect(r.kind).toBe("retryable");
+});
