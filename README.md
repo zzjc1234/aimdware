@@ -15,7 +15,7 @@ Three components:
 │                    Student's own laptop                          │
 │                                                                  │
 │   coding agent  ──▶  aimdware router  ──▶  OpenAI / DeepSeek /   │
-│   (Cline / Aider /  (course token +           upstream LLM       │
+│   (Cline / Aider /  (student token +          upstream LLM       │
 │    OpenCode...)      student's LLM key)                          │
 │                          │             │                         │
 └──────────────────────────┼─────────────┼─────────────────────────┘

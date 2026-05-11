@@ -21,8 +21,8 @@ Under these, no client-side software can guarantee monitoring.
 - **Accidental violations** — students unaware AI use needed disclosure.
 - **Server-side data leaks** — backend stores no content, only
   metadata + hash + URI. A full DB compromise yields no student work.
-  Write-only ingest bounds a stolen course token to writes for one
-  (student, course).
+  Write-only ingest bounds a stolen student token to fake writes for
+  that student's enrolled courses; it can't read anything.
 
 ## What it does NOT protect against
 

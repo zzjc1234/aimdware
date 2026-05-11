@@ -1,19 +1,19 @@
 # Backend
 
 - Python 3.12 + FastAPI + SQLModel + Alembic + PostgreSQL
-- Auth: course-token bearer for `/ingest/*`. No sessions, no password
+- Auth: student-token bearer for `/ingest/*`. No sessions, no password
   hashing in v1.
 
 ## Ingest API
 
-Caller: student router. Auth: course token in `Authorization: Bearer ct_...`.
+Caller: student router. Auth: student token in `Authorization: Bearer st_...`.
 Write-only — no endpoint returns content.
 
-| Method | Path                                   | Function                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET`  | `/ingest/health`                       | Unauthenticated liveness probe.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `POST` | `/ingest/context`                      | Record one entry. Body: `{ record_id, blob_hash, blob_uri, blob_size, model, prompt_tokens, completion_tokens, ts, router_version, client_meta }`. Resolves `(student, course)` from the token, inserts `ContextRecord` with `blob_status = pending`. **Idempotent on `record_id`**: a repeat POST with the same id returns `200` with the existing row (no double insert), provided the body matches; mismatched body → `409 Conflict`. New inserts return `202`. |
-| `POST` | `/ingest/context/{record_id}/uploaded` | Router calls this after `rclone copy` to the Tbox WebDAV endpoint reports success. Transitions `blob_status` to `uploaded`. Idempotent.                                                                                                                                                                                                                                                                                                                            |
+| Method | Path                                   | Function |
+| ------ | -------------------------------------- | -------- |
+| `GET`  | `/ingest/health`                       | Unauthenticated liveness probe. |
+| `POST` | `/ingest/context`                      | Record one entry. Body: `{ record_id, course_code, blob_hash, blob_uri, blob_size, model, prompt_tokens, completion_tokens, ts, router_version, client_meta }`. Backend resolves `student_id` from the token, resolves `course_id` from `course_code`, verifies `Enrollment(student, course, role=student)` exists, inserts `ContextRecord` with `blob_status = pending`. **Idempotent on `record_id`**: a repeat POST with the same id returns `200` with the existing row (no double insert), provided the body matches; mismatched body → `409 Conflict`. New inserts return `202`. Returns `403` if the student is not enrolled in the named course. |
+| `POST` | `/ingest/context/{record_id}/uploaded` | Router calls this after `rclone copy` to the Tbox WebDAV endpoint reports success. Transitions `blob_status` to `uploaded`. Idempotent. |
 
 Blobs never traverse this surface — only the hash, URI, and metadata.
 
@@ -75,20 +75,20 @@ class Enrollment(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
-class CourseToken(SQLModel, table=True):
-    __tablename__ = "course_tokens"
+class StudentToken(SQLModel, table=True):
+    __tablename__ = "student_tokens"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="users.id", index=True)
-    course_id: UUID = Field(foreign_key="courses.id", index=True)
     token_hash: bytes = Field(sa_column=Column(LargeBinary))
     prefix: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
     revoked_at: Optional[datetime] = None
 
-    # Partial unique index on (user_id, course_id) WHERE revoked_at IS NULL
-    # is created in the Alembic migration.
-    __table_args__ = (Index("ix_course_tokens_user_course", "user_id", "course_id"),)
+    # Partial unique index on (user_id) WHERE revoked_at IS NULL
+    # is created in the Alembic migration to enforce one active token per
+    # student. Course context is supplied per-request in /ingest/context.
+    __table_args__ = (Index("ix_student_tokens_user", "user_id"),)
 
 
 class ContextRecord(SQLModel, table=True):
@@ -113,12 +113,15 @@ class ContextRecord(SQLModel, table=True):
 
 Notes:
 
-- `CourseToken` rotation inserts a new row and sets `revoked_at` on
-  the old. The partial unique index enforces one active token per
-  (student, course).
-- `BlobStatus` reaches `uploaded` from the router's own POST. The
-  TT's `records fetch --verify` writes `verified` / `tampered` /
-  `missing` when they inspect a record.
+- One `StudentToken` per student. Rotation inserts a new row and sets
+  `revoked_at` on the old; the partial unique index enforces "at most
+  one active token per student".
+- Course context per ingest is supplied via `course_code` in the request
+  body. Backend resolves the course and verifies the student is enrolled
+  in it (`role = student`); otherwise rejects with 403.
+- `BlobStatus` reaches `uploaded` from the router's own POST. The TT's
+  `records fetch --verify` writes `verified` / `tampered` / `missing`
+  when they inspect a record.
 - `ContextRecord.id` is the router-generated idempotency key. The PK
   uniqueness on `id` plus the API's "match existing row → 200, mismatch
   → 409" semantics make `POST /ingest/context` safely retryable.
@@ -127,12 +130,13 @@ Notes:
 
 ## Security
 
-- **Course token scoping.** The token encodes `(student, course)` via
-  its row; the router cannot influence attribution by tampering with
-  the request body.
-- **Write-only ingest.** No HTTP read surface, so a stolen course
-  token writes at most fake records for one student-course.
+- **Token → student attribution.** The token identifies the student;
+  the router cannot impersonate someone else by tampering with the body.
+- **Course is verified per request.** Backend rejects ingest for any
+  course the student is not enrolled in.
+- **Write-only ingest.** No HTTP read surface, so a stolen student
+  token writes at most fake records for that student's enrolled courses.
 - **No content on the backend.** Postgres holds metadata + hash + URI.
   A full DB compromise yields no student work.
-- **Constant-time compare** on course-token validation; tokens never
+- **Constant-time compare** on student-token validation; tokens never
   in logs.

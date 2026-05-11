@@ -28,15 +28,16 @@ aimdware-admin user create   --jaccount zhangsan --email z@sjtu.edu.cn --display
 aimdware-admin course create --code ECE4721J --title "Intro to Systems" --semester 2026-spring
 aimdware-admin enrol         --course ECE4721J --user zhangsan --role student   # or --role admin
 aimdware-admin enrol-bulk    --course ECE4721J --csv roster.csv
-aimdware-admin token issue   --course ECE4721J --user zhangsan
-aimdware-admin token revoke  --course ECE4721J --user zhangsan
+aimdware-admin token issue   --user zhangsan       # one token per student; not course-scoped
+aimdware-admin token revoke  --user zhangsan
 aimdware-admin records list  --course ECE4721J [--student zhangsan] [--since 2026-04-01]
 aimdware-admin records show  --id <record_id>
 aimdware-admin records fetch --id <record_id> [--verify]
 ```
 
-- `token issue` prints the plaintext course token once; hand it directly
-  to the student.
+- `token issue` prints the plaintext student token once; hand it
+  directly to the student. The token is not course-scoped; the student's
+  router config supplies the active course per request.
 - `records fetch` is the only command that touches jbox. Uses the TT's
   own jaccount; the backend never holds a jbox credential in v1.
 - `--verify` recomputes sha256 over the fetched blob and writes

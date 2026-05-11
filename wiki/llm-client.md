@@ -13,15 +13,21 @@ Both happen in parallel, both off the student's critical path.
 ## Config
 
 ```yaml
-course_token: ct_... # TT hands it to the student directly
+student_token: st_... # one per student; TT hands it directly
+course: ECE4721J # course code; sent with every ingest call
 upstream:
   base_url: https://api.openai.com # default; overridable
   api_key: sk-... # student's own
 port: 12345 # router listens here; coding agent points at it
 local_cache_dir: ~/.cache/aimdware # router-owned buffer
-jbox_remote_path: aimdware/<course_name> # target path inside jbox cloud
+jbox_remote_path: aimdware/<course> # target path inside jbox cloud
 backend_url: https://aimdware.sjtu.edu # hardcoded per build / overridable via flag
 ```
+
+`student_token` is one credential per student; `course` selects which
+course context this router instance reports to. A student enrolled in
+multiple courses runs one router instance per course (different `port`
+and `course`), or a single instance with multi-course config (post-v1).
 
 The router holds no jbox credential — auth lives inside Tbox.
 

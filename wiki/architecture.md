@@ -6,35 +6,36 @@ v1 ships three components: a **backend** (Python/FastAPI/Postgres), an
 **LLM client** (Bun single binary on the student's machine), and an
 **admin script** (`aimdware-admin` Python CLI for the TT). Two roles:
 **student** and **admin** (a.k.a. TT). Admin authority is scoped per
-course via `enrollments` — being an admin in CS101 grants no access to
+course via `enrollments` -- being an admin in CS101 grants no access to
 CS201's data.
 
 ```
-                 ┌───────────────────────┐
-                 │  TT (admin)           │ ──── aimdware-admin CLI
-                 └───────────────────────┘      (direct Postgres) +
-                                                jbox via own jaccount
-                 ┌───────────────────────┐
-                 │  Student              │ ──── upload via router
-                 └───────────────────────┘
-                                              ▼
-                          ┌──────────────────────────┐      ┌───────────────┐
-                          │  Backend (ingest only)   │◀─────│ Client router │
-                          │  metadata + hash only    │      │ student's     │
-                          └──────────────────────────┘      │ localhost     │
-                                                            └───┬───────┬───┘
-                                                                │       │
-                                                          blob  │       │ chat
-                                                         (JSON) │       │ completion
-                                                                ▼       ▼
-                                                ┌──────────────────────┐    ┌──────────────┐
-                                                │ Student's jbox       │    │ Upstream LLM │
-                                                │ (1 TB/student quota) │    │ (OpenAI etc.)│
-                                                └──────────────────────┘    └──────────────┘
+       +-----------------------+
+       | TT (admin)            | ---- aimdware-admin CLI
+       +-----------------------+      (direct Postgres) +
+                                      jbox via own jaccount
+       +-----------------------+
+       | Student               | ---- upload via router
+       +-----------------------+
+                                            |
+                                            v
+                  +--------------------------+    +-----------------+
+                  |  Backend (ingest only)   |<---| Client router   |
+                  |  metadata + hash only    |    | student's       |
+                  +--------------------------+    | localhost       |
+                                                  +--+--------+-----+
+                                                     |        |
+                                                blob |        | chat
+                                                (JSON)|        | completion
+                                                     v        v
+                                       +----------------------+ +--------------+
+                                       | Student's jbox       | | Upstream LLM |
+                                       | (1 TB/student quota) | | (OpenAI etc.)|
+                                       +----------------------+ +--------------+
 ```
 
 The router is the only piece that sees the student's LLM credential.
-The backend stores no payload content — only metadata, hash, and the
+The backend stores no payload content -- only metadata, hash, and the
 jbox URI.
 
 ## Components
@@ -57,18 +58,22 @@ fetches blobs from jbox for inspection.
 
 | Credential          | Held by | Used for                      |
 | ------------------- | ------- | ----------------------------- |
-| Course token        | student | router -> backend ingest auth |
+| Student token       | student | router -> backend ingest auth |
 | Student LLM API key | student | router -> upstream LLM        |
 
-The router holds no jbox secret — auth lives in the student's locally
+One student token per student; the course context is sent in each
+ingest request body (`course_code`). The backend verifies the student
+is enrolled in that course before recording. Rotating the token
+revokes all further uploads for the student across every course they
+are enrolled in; LLM access is unaffected.
+
+The router holds no jbox secret -- auth lives in the student's locally
 running Tbox (WebDAV gateway to jbox), already bound to their jaccount.
-The backend holds no jbox credential in v1. Course tokens are
-per-`(student, course)`; rotating one disables further uploads for that
-pair without affecting LLM access.
+The backend holds no jbox credential in v1.
 
 ## Roles and RBAC
 
-`enrollments(user_id, course_id, role)` with `role ∈ {student, admin}`.
+`enrollments(user_id, course_id, role)` with `role` in `{student, admin}`.
 An admin enrollment grants TT-level access **only to that course**;
 there is no global admin flag. v1 enforcement is soft (the admin
 script filters operations by the caller's admin enrollments); raw SQL
@@ -77,7 +82,7 @@ bypasses it.
 ## Storage split
 
 - Postgres: metadata + hash + URI only. ~500 B per row; for 20 courses
-  × 100 active students × 50 req/day × 100 days ≈ 5 GB / semester.
+  x 100 active students x 50 req/day x 100 days ~ 5 GB / semester.
 - jbox (per student): full JSON payloads, addressed by record id.
 - Tamper detection by hash.
 
