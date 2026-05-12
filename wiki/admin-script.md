@@ -1,83 +1,94 @@
 # Admin script
 
-The TT-side command-line tool. Talks directly to the backend's Postgres
-(via the same SQLModel schema) for user / course / token management,
-and pulls blobs from jbox for inspection via a locally-running Tbox
-WebDAV endpoint bound to the TT's own jaccount.
+`aimdware-admin` — the TT-side CLI. Talks directly to the backend's
+database (same SQLModel schema) for user / course / token management,
+and pulls blobs from jbox via a locally-running Tbox WebDAV endpoint
+(bound to the TT's own jaccount) for inspection.
 
-The caller's authority is scoped to the courses where they hold
-`role = admin` in `enrollments`. All commands filter by that scope; an
-admin in CS101 cannot list / fetch records or issue tokens for CS201.
-Identity is read from `$AIMDWARE_ADMIN_JACCOUNT` (or a `--as <jaccount>`
-flag). This is soft enforcement — raw SQL bypasses it.
+The CLI ships inside the `aimdware-backend` Python package and is
+exposed as a `project.scripts` entry point, so it's installed alongside
+the backend itself:
 
-## Tech stack
+```bash
+AIMDWARE_DATABASE_URL=postgresql://... \
+    uv run aimdware-admin <subcommand> ...
+```
 
-- Python 3.12, same SQLModel schema as the backend
-- Shipped as a Python package in the same repo
-- jbox access: TT runs [Tbox](https://github.com/1357310795/TboxWebdav)
-  locally (same as the student-side setup, just authenticated to the
-  TT's jaccount). `records fetch` shells out to `rclone` against the
-  Tbox WebDAV endpoint — e.g. `rclone copy tbox:<student>/aimdware/<course>/<record_id>.json ./`.
-  Student-side permission grants on those paths are handled out-of-band.
+v1 has **no in-CLI access control** — anyone who can run the script
+can do anything. Authority is enforced by who has DB / shell access on
+the backend host. Course-scoped admin role enforcement is deferred.
 
 ## Commands
 
 ```
-aimdware-admin user create   --jaccount zhangsan --email z@sjtu.edu.cn --display "Zhang San"
+aimdware-admin user create   --jaccount alice --email a@sjtu.edu.cn --name "Alice Liu"
+aimdware-admin user list
+
 aimdware-admin course create --code ECE4721J --title "Intro to Systems" --semester 2026-spring
-aimdware-admin enrol         --course ECE4721J --user zhangsan --role student   # or --role admin
-aimdware-admin enrol-bulk    --course ECE4721J --csv roster.csv
-aimdware-admin token issue   --user zhangsan       # one token per student; not course-scoped
-aimdware-admin token revoke  --user zhangsan
-aimdware-admin token rotate  --user zhangsan       # atomic revoke + issue
-aimdware-admin records list  --course ECE4721J [--student zhangsan] [--since 2026-04-01]
-aimdware-admin records show  --id <record_id>
-aimdware-admin records fetch --id <record_id> [--verify]
+aimdware-admin course list
+
+aimdware-admin enroll        --user alice --course ECE4721J [--role student|admin]
+
+aimdware-admin token issue   --user alice          # revokes any prior active token + issues new
+aimdware-admin token revoke  --prefix st_K9aB6r    # 8-char prefix is shown when issued
+aimdware-admin token list    [--user alice]
+
+aimdware-admin record list   [--course X] [--user X] [--status pending|uploaded|...] [--limit N]
+aimdware-admin record payload --id <record_id>     # fetch blob from Tbox + verify sha256
 ```
 
-- `records fetch` is the only command that touches jbox. Uses the TT's
-  own jaccount; the backend never holds a jbox credential in v1.
-- `--verify` recomputes sha256 over the fetched blob and writes
-  `blob_status = verified | tampered | missing` back to the row.
+All commands print JSON to stdout (newline-indented) so scripts can
+pipe through `jq`. `token issue` is the **only place the plaintext is
+ever observable** — capture it immediately and hand it to the student
+through your channel of choice.
 
 ## Token lifecycle
 
-The plaintext token only exists at issue time. Backend stores
-`sha256(plaintext)`; the student's router config is the only place the
-plaintext lives long-term.
+Backend stores `sha256(plaintext)`; the student's router config is the
+only place the plaintext lives long-term.
 
 ```
 issue:
-  plaintext = "st_" + crypto.randomBytes(32).base64url
+  plaintext = "st_" + secrets.token_urlsafe(32)
   hash      = sha256(plaintext)
-  prefix    = plaintext[:8]              # human ID, e.g. "st_K9aB"
+  prefix    = plaintext[:8]              # human ID, e.g. "st_K9aB6r"
 
-  with atomic transaction:
-    revoke any existing active token for this user
+  transaction:
+    set revoked_at on any active token for this user
     INSERT INTO student_tokens (user_id, token_hash, prefix, created_at)
                          VALUES (uid, hash, prefix, now)
 
-  print(plaintext)                       # only time plaintext is observable
-                                         # ↳ hand to student through any channel
+  print(plaintext)                       # ONLY time plaintext is observable
 
 revoke:
   UPDATE student_tokens SET revoked_at = NOW()
-  WHERE user_id = uid AND revoked_at IS NULL
+  WHERE prefix = ? AND revoked_at IS NULL
 
-rotate:
-  atomic { revoke; issue }
-  print new plaintext; student updates router config
+rotate (= issue again):
+  atomic { revoke active; insert new }
+  print new plaintext
 ```
 
-`token issue` and `token rotate` print the plaintext exactly once and
-nowhere else. If the student loses it, only `rotate` recovers (we
-cannot read the old one back).
+If the student loses the plaintext, `token issue` again is the only
+path — we cannot recover the old one.
 
-## Project layout
+## record payload
 
-```
-src/aimdware_admin/
-  cli.py
-  jbox_inspect.py
-```
+`aimdware-admin record payload --id <uuid>` is the same logic as the
+admin HTTP endpoint `GET /admin/context/<id>/payload`: it pulls the
+blob from the configured Tbox endpoint (`AIMDWARE_TBOX_URL`,
+`AIMDWARE_TBOX_USER`, `AIMDWARE_TBOX_PASS` env vars) and recomputes
+sha256 against the stored `blob_hash`. Returns a `verified` flag plus
+the UTF-8-decoded payload so the TT can `jq '.request.messages'` it
+directly.
+
+The CLI does **not** write `blob_status = verified | tampered | missing`
+back to the DB. That's an operator-driven action and we want it in a
+separate command (TODO).
+
+## Deferred
+
+- Course-scoped admin authority (filter commands by `--as <admin>`)
+- `enroll bulk --csv roster.csv`
+- `record verify` that updates `blob_status` after fetching
+- Audit log of who ran which command when

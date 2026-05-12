@@ -12,6 +12,9 @@ dependencies = [
     "httpx>=0.28.1",
 ]
 
+[project.scripts]
+aimdware-admin = "aimdware_backend.admin_cli:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",
