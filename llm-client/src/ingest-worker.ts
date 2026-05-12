@@ -1,5 +1,6 @@
 import type { IngestQueue, RecordState } from "./queue";
 import type { IngestBody } from "./ingest";
+import { StoppableSleep } from "./util";
 
 export const DEFAULT_BACKOFF: number[] = [
   1_000, 5_000, 30_000, 5 * 60_000, 30 * 60_000, 60 * 60_000,
@@ -137,6 +138,7 @@ export function startWorkerLoop(
   opts: WorkerOpts,
   pollMs = 1000,
 ): WorkerLoopHandle {
+  const sleeper = new StoppableSleep();
   let stopped = false;
   const done = (async () => {
     while (!stopped) {
@@ -145,12 +147,14 @@ export function startWorkerLoop(
       } catch (e) {
         console.error("worker tick failed:", (e as Error).message);
       }
-      await Bun.sleep(pollMs);
+      if (stopped) break;
+      await sleeper.sleep(pollMs);
     }
   })();
   return {
     async stop() {
       stopped = true;
+      sleeper.stop();
       await done;
     },
   };

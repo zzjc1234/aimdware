@@ -11,6 +11,7 @@ import { startWorkerLoop, type Stages, type StageHandler } from "./ingest-worker
 import { postContext, confirmUploaded, type IngestBody } from "./ingest";
 import { syncBlob, makeWebDAVPut, type WebDAVPutLike } from "./sync";
 import { writeAtomic, bytesToHex, redactToken } from "./util";
+import { startEvictionLoop } from "./eviction";
 import type { CaptureResult } from "./capture";
 
 const ROUTER_VERSION = "0.0.0";
@@ -166,6 +167,8 @@ async function main() {
     1000,
   );
 
+  const eviction = startEvictionLoop({ queue, cacheDir });
+
   console.log(
     `aimdware-router listening on http://${handle.hostname}:${handle.port}`,
   );
@@ -181,6 +184,7 @@ async function main() {
     console.log(`\n${signal} received, stopping`);
     await handle.stop();
     await worker.stop();
+    await eviction.stop();
     queue.close();
     process.exit(0);
   };

@@ -38,18 +38,6 @@ function pickFreePort(): Promise<number> {
   });
 }
 
-async function streamToString(s: ReadableStream<Uint8Array> | undefined): Promise<string> {
-  if (!s) return "";
-  const reader = s.getReader();
-  const chunks: Uint8Array[] = [];
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) chunks.push(value);
-  }
-  return new TextDecoder().decode(Buffer.concat(chunks.map((c) => Buffer.from(c))));
-}
-
 test("main: serves /healthz and proxies a chat completion end-to-end", async () => {
   const fakeUpstream = Bun.serve({
     port: 0,
@@ -114,7 +102,6 @@ test("main: never prints plaintext student_token or upstream api_key", async () 
   const tmp = await mkdtemp(join(tmpdir(), "aimdware-redact-"));
   tmpDirs.push(tmp);
 
-  // Use distinctive, long, unmistakable test secrets
   const STUDENT = "st_DO_NOT_LOG_ME_THIS_IS_LONG_AND_OBVIOUS_zzzz";
   const APIKEY = "sk-DO_NOT_LOG_ME_EITHER_zzzz";
 
@@ -141,10 +128,24 @@ backend_url: http://127.0.0.1:1
   });
   procs.push(proc);
 
+  // Drain stdout/stderr CONCURRENTLY — otherwise the pipe fills and the
+  // child blocks on console.log.
+  const stdoutChunks: Uint8Array[] = [];
+  const stderrChunks: Uint8Array[] = [];
+  const drainStdout = (async () => {
+    for await (const chunk of proc.stdout as ReadableStream<Uint8Array>) {
+      stdoutChunks.push(chunk);
+    }
+  })();
+  const drainStderr = (async () => {
+    for await (const chunk of proc.stderr as ReadableStream<Uint8Array>) {
+      stderrChunks.push(chunk);
+    }
+  })();
+
   try {
     await waitForPort(routerPort);
 
-    // Fire one chat to exercise the capture / ingest logging path too
     await fetch(`http://127.0.0.1:${routerPort}/v1/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -153,14 +154,17 @@ backend_url: http://127.0.0.1:1
 
     await Bun.sleep(100);
     proc.kill();
-    const stdout = await streamToString(proc.stdout as ReadableStream<Uint8Array>);
-    const stderr = await streamToString(proc.stderr as ReadableStream<Uint8Array>);
-    const combined = stdout + stderr;
+    await Promise.race([proc.exited, Bun.sleep(2000)]);
+    await Promise.all([drainStdout, drainStderr]);
+
+    const decode = (cs: Uint8Array[]) =>
+      Buffer.concat(cs.map((c) => Buffer.from(c))).toString("utf-8");
+    const combined = decode(stdoutChunks) + decode(stderrChunks);
 
     expect(combined).not.toContain(STUDENT);
     expect(combined).not.toContain(APIKEY);
-    // sanity: the redacted versions should be present (proves we did log
-    // *something* about the token, we just redacted it)
+    // Sanity: the redacted prefix should appear (proves we did log
+    // *something* about the token).
     expect(combined).toContain(STUDENT.slice(0, 8));
     expect(combined).toContain(APIKEY.slice(0, 8));
   } finally {

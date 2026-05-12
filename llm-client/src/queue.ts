@@ -46,10 +46,13 @@ const SCHEMA = `
     attempts         INTEGER NOT NULL DEFAULT 0,
     next_attempt_at  INTEGER NOT NULL,
     last_error       TEXT,
-    created_at       INTEGER NOT NULL
+    created_at       INTEGER NOT NULL,
+    cache_evicted    INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS ix_outbox_active
     ON outbox (state, next_attempt_at);
+  CREATE INDEX IF NOT EXISTS ix_outbox_evictable
+    ON outbox (state, cache_evicted, created_at);
 `;
 
 export class IngestQueue {
@@ -141,6 +144,38 @@ export class IngestQueue {
       )
       .get(record_id) as QueueStatus | null;
     return row ?? undefined;
+  }
+
+  /**
+   * Done records whose cache file is older than the threshold and not yet
+   * evicted. Cap by limit.
+   */
+  findEvictable(olderThanCreatedAt: number, limit: number): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT record_id FROM outbox
+         WHERE state = 'done'
+           AND cache_evicted = 0
+           AND created_at < ?
+         ORDER BY created_at ASC
+         LIMIT ?`,
+      )
+      .all(olderThanCreatedAt, limit) as { record_id: string }[];
+    return rows.map((r) => r.record_id);
+  }
+
+  markEvicted(record_id: string): void {
+    this.db
+      .prepare(`UPDATE outbox SET cache_evicted = 1 WHERE record_id = ?`)
+      .run(record_id);
+  }
+
+  /** Did we already free this record's cache file? */
+  isEvicted(record_id: string): boolean {
+    const row = this.db
+      .prepare(`SELECT cache_evicted FROM outbox WHERE record_id = ?`)
+      .get(record_id) as { cache_evicted: number } | null;
+    return row?.cache_evicted === 1;
   }
 
   close(): void {

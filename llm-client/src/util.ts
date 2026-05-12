@@ -36,3 +36,34 @@ export function redactToken(token: string | undefined | null): string {
   return `${token.slice(0, 8)}…`;
 }
 
+/**
+ * Sleep that resolves immediately when stop() is called. Used by long-poll
+ * worker loops so SIGTERM-driven shutdown doesn't hang on a half-finished
+ * 30-minute interval.
+ */
+export class StoppableSleep {
+  private stopped = false;
+  private wake: (() => void) | null = null;
+
+  sleep(ms: number): Promise<void> {
+    if (this.stopped) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const t = setTimeout(() => {
+        this.wake = null;
+        resolve();
+      }, ms);
+      this.wake = () => {
+        clearTimeout(t);
+        this.wake = null;
+        resolve();
+      };
+    });
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.wake?.();
+  }
+}
+
+
