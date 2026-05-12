@@ -20,3 +20,19 @@ export async function writeAtomic(
 export function bytesToHex(b: Uint8Array): string {
   return Buffer.from(b).toString("hex");
 }
+
+/**
+ * Mask a credential for human display in logs / status pages.
+ *
+ * Short tokens collapse to "***". Long tokens keep the leading 8 chars
+ * (the human "prefix" — matches what the admin script + backend show)
+ * plus a "..." suffix.
+ *
+ * NEVER include the full plaintext in any printed string.
+ */
+export function redactToken(token: string | undefined | null): string {
+  if (!token) return "(unset)";
+  if (token.length <= 12) return "***";
+  return `${token.slice(0, 8)}…`;
+}
+

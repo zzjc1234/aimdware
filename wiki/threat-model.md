@@ -23,6 +23,15 @@ Under these, no client-side software can guarantee monitoring.
   metadata + hash + URI. A full DB compromise yields no student work.
   Write-only ingest bounds a stolen student token to fake writes for
   that student's enrolled courses; it can't read anything.
+- **Backend DB leak doesn't leak tokens** — only `sha256(token)` is
+  stored. Tokens are 256-bit random; rainbow tables don't apply. A
+  full DB dump can't be used to impersonate students against a live
+  backend.
+- **Token rotation as the response to client-side leakage.** Plaintext
+  lives in the router's `config.json` (mode 600). If that file is
+  compromised, the only mitigation is `aimdware-admin token rotate`;
+  the leaked token cannot be retroactively scrubbed from the student's
+  machine.
 
 ## What it does NOT protect against
 

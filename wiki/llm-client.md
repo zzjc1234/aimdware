@@ -31,6 +31,20 @@ and `course`), or a single instance with multi-course config (post-v1).
 
 The router holds no jbox credential — auth lives inside Tbox.
 
+### Token storage and rotation
+
+The `student_token` plaintext is **the only long-lived copy** of the
+credential. The backend stores only `sha256(token)`. Implications:
+
+- `config.json` is written with mode `600`; the router never logs the
+  plaintext (`student_token` is on the redact list).
+- If the laptop / config file is compromised, treat the token as leaked
+  and ask the TT to run `aimdware-admin token rotate --user <jaccount>`.
+  This invalidates the leaked token at the next backend request and
+  prints a new plaintext to paste into config.
+- If the student loses the token, the same rotate flow is the only
+  recovery — we cannot read back the old one from the backend.
+
 ## Output
 
 OpenAI-compatible Chat Completions at `http://127.0.0.1:<port>`. Coding

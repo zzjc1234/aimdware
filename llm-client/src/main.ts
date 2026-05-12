@@ -10,7 +10,7 @@ import { IngestQueue } from "./queue";
 import { startWorkerLoop, type Stages, type StageHandler } from "./ingest-worker";
 import { postContext, confirmUploaded, type IngestBody } from "./ingest";
 import { syncBlob, makeWebDAVPut, type WebDAVPutLike } from "./sync";
-import { writeAtomic, bytesToHex } from "./util";
+import { writeAtomic, bytesToHex, redactToken } from "./util";
 import type { CaptureResult } from "./capture";
 
 const ROUTER_VERSION = "0.0.0";
@@ -170,6 +170,8 @@ async function main() {
     `aimdware-router listening on http://${handle.hostname}:${handle.port}`,
   );
   console.log(`  upstream:    ${config.upstream.base_url} (${config.upstream.type})`);
+  console.log(`  upstream key: ${redactToken(config.upstream.api_key)}`);
+  console.log(`  student token: ${redactToken(config.student_token)}`);
   console.log(`  course:      ${config.course}`);
   console.log(`  backend:     ${config.backend_url}`);
   console.log(`  tbox:        ${config.tbox_url}`);

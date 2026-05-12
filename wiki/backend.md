@@ -128,6 +128,30 @@ Notes:
 - `blob_size` uses `BIGINT` (not `INTEGER`) — INTEGER tops out at 2 GB
   and runaway blobs should fail loudly, not silently truncate.
 
+## Token validation
+
+The plaintext token never lives on the backend. Each ingest request:
+
+```
+1. plaintext = request.headers["Authorization"].removeprefix("Bearer ")
+2. hash = sha256(plaintext)
+3. row = SELECT user_id FROM student_tokens
+         WHERE token_hash = hash AND revoked_at IS NULL
+4. if not row: return 401
+5. inject user_id into request.context
+```
+
+Implementation notes:
+
+- The DB equality on `token_hash` (a fixed-length `bytea`) is constant-time
+  for our purposes; no need for `hmac.compare_digest` after the lookup
+  succeeds (the row matched by definition).
+- `Authorization` is added to the logger's redact set, so plaintext
+  never appears in stdout / file logs.
+- We use plain sha256, not argon2 / bcrypt. Tokens are 256-bit random
+  secrets — search space is 2²⁵⁶, rainbow tables don't apply. Slow
+  hashing exists to penalize weak passwords; it's not needed here.
+
 ## Security
 
 - **Token → student attribution.** The token identifies the student;
@@ -138,5 +162,8 @@ Notes:
   token writes at most fake records for that student's enrolled courses.
 - **No content on the backend.** Postgres holds metadata + hash + URI.
   A full DB compromise yields no student work.
+- **DB compromise leaks no usable token.** Only `sha256(token)` is
+  stored. Rotation is the response to a suspected leak — see
+  [admin-script.md](admin-script.md).
 - **Constant-time compare** on student-token validation; tokens never
   in logs.

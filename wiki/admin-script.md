@@ -30,18 +30,49 @@ aimdware-admin enrol         --course ECE4721J --user zhangsan --role student   
 aimdware-admin enrol-bulk    --course ECE4721J --csv roster.csv
 aimdware-admin token issue   --user zhangsan       # one token per student; not course-scoped
 aimdware-admin token revoke  --user zhangsan
+aimdware-admin token rotate  --user zhangsan       # atomic revoke + issue
 aimdware-admin records list  --course ECE4721J [--student zhangsan] [--since 2026-04-01]
 aimdware-admin records show  --id <record_id>
 aimdware-admin records fetch --id <record_id> [--verify]
 ```
 
-- `token issue` prints the plaintext student token once; hand it
-  directly to the student. The token is not course-scoped; the student's
-  router config supplies the active course per request.
 - `records fetch` is the only command that touches jbox. Uses the TT's
   own jaccount; the backend never holds a jbox credential in v1.
 - `--verify` recomputes sha256 over the fetched blob and writes
   `blob_status = verified | tampered | missing` back to the row.
+
+## Token lifecycle
+
+The plaintext token only exists at issue time. Backend stores
+`sha256(plaintext)`; the student's router config is the only place the
+plaintext lives long-term.
+
+```
+issue:
+  plaintext = "st_" + crypto.randomBytes(32).base64url
+  hash      = sha256(plaintext)
+  prefix    = plaintext[:8]              # human ID, e.g. "st_K9aB"
+
+  with atomic transaction:
+    revoke any existing active token for this user
+    INSERT INTO student_tokens (user_id, token_hash, prefix, created_at)
+                         VALUES (uid, hash, prefix, now)
+
+  print(plaintext)                       # only time plaintext is observable
+                                         # ↳ hand to student through any channel
+
+revoke:
+  UPDATE student_tokens SET revoked_at = NOW()
+  WHERE user_id = uid AND revoked_at IS NULL
+
+rotate:
+  atomic { revoke; issue }
+  print new plaintext; student updates router config
+```
+
+`token issue` and `token rotate` print the plaintext exactly once and
+nowhere else. If the student loses it, only `rotate` recovers (we
+cannot read the old one back).
 
 ## Project layout
 

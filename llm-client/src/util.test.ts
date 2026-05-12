@@ -2,7 +2,7 @@ import { test, expect, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeAtomic } from "./util";
+import { writeAtomic, redactToken } from "./util";
 
 const tmpDirs: string[] = [];
 function freshDir(): string {
@@ -41,4 +41,19 @@ test("writeAtomic on a non-existent directory throws (does not silently mkdir)",
   await expect(
     writeAtomic("/nonexistent/dir/x.json", new TextEncoder().encode("x")),
   ).rejects.toThrow();
+});
+
+test("redactToken keeps only the 8-char prefix; full plaintext never appears", () => {
+  const plaintext = "st_K9aBxYz1234567890abcdefghijklmnopqrstuvwxyz";
+  const redacted = redactToken(plaintext);
+  expect(redacted.startsWith("st_K9aBx")).toBe(true);
+  expect(redacted).not.toContain(plaintext.slice(8));
+  expect(redacted).not.toContain(plaintext);
+});
+
+test("redactToken collapses short / empty values without leaking", () => {
+  expect(redactToken("")).toBe("(unset)");
+  expect(redactToken(undefined)).toBe("(unset)");
+  expect(redactToken(null)).toBe("(unset)");
+  expect(redactToken("short")).toBe("***");
 });
