@@ -141,3 +141,79 @@ test("pickReady returns records in any active state (captured / ingested / synce
   expect(byState).toEqual({ a: "captured", b: "ingested", c: "synced" });
   q.close();
 });
+
+// --- claim() (atomic single-flight) ---
+
+test("claim returns ready records and marks them claimed_at = now", () => {
+  const { q } = freshDb();
+  q.enqueue(body("a"), 0);
+  q.enqueue(body("b"), 0);
+  const claimed = q.claim(1000, 10);
+  expect(claimed.map((r) => r.body.record_id).sort()).toEqual(["a", "b"]);
+  expect(q.statusOf("a")?.claimed_at).toBe(1000);
+  expect(q.statusOf("b")?.claimed_at).toBe(1000);
+  q.close();
+});
+
+test("claim does not return records currently held by another claim", () => {
+  const { q } = freshDb();
+  q.enqueue(body("a"), 0);
+  q.enqueue(body("b"), 0);
+  expect(q.claim(1000, 10)).toHaveLength(2);
+  // A second worker calling claim immediately gets nothing.
+  expect(q.claim(1500, 10)).toHaveLength(0);
+  q.close();
+});
+
+test("claim re-claims stale claims (claimed_at older than staleMs)", () => {
+  const { q } = freshDb();
+  q.enqueue(body("a"), 0);
+  q.claim(1000, 10, 60_000);
+  // Within stale window — still claimed.
+  expect(q.claim(1000 + 30_000, 10, 60_000)).toHaveLength(0);
+  // Past stale window — re-claimable.
+  expect(q.claim(1000 + 61_000, 10, 60_000)).toHaveLength(1);
+  q.close();
+});
+
+test("advance / markRetry / markTerminal release the claim", () => {
+  const { q } = freshDb();
+  q.enqueue(body("a"), 0);
+  q.enqueue(body("b"), 0);
+  q.enqueue(body("c"), 0);
+  q.claim(1000, 10);
+
+  q.advance("a", "ingested", 1000);
+  expect(q.statusOf("a")?.claimed_at).toBeNull();
+
+  q.markRetry("b", "503", 5000);
+  expect(q.statusOf("b")?.claimed_at).toBeNull();
+
+  q.markTerminal("c", "fatal", "401");
+  expect(q.statusOf("c")?.claimed_at).toBeNull();
+  q.close();
+});
+
+test("after advance the next claim picks the record up at its new stage", () => {
+  const { q } = freshDb();
+  q.enqueue(body("a"), 0);
+  q.claim(1000, 10);
+  q.advance("a", "ingested", 1000);
+  const claimed = q.claim(2000, 10);
+  expect(claimed).toHaveLength(1);
+  expect(claimed[0]!.state).toBe("ingested");
+  q.close();
+});
+
+test("claim respects limit + ordering, claims oldest first", () => {
+  const { q } = freshDb();
+  q.enqueue(body("c"), 30);
+  q.enqueue(body("a"), 10);
+  q.enqueue(body("b"), 20);
+  const first = q.claim(1000, 2);
+  expect(first.map((r) => r.body.record_id)).toEqual(["a", "b"]);
+  // c is still unclaimed
+  expect(q.statusOf("a")?.claimed_at).toBe(1000);
+  expect(q.statusOf("c")?.claimed_at).toBeNull();
+  q.close();
+});

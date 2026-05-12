@@ -72,7 +72,7 @@ export async function runOnce(
   const concurrency = opts.concurrency ?? 4;
   const backoff = opts.backoff ?? DEFAULT_BACKOFF;
 
-  const ready = opts.queue.pickReady(now, limit);
+  const ready = opts.queue.claim(now, limit);
 
   const summary: RunSummary = {
     processed: ready.length,

@@ -31,6 +31,7 @@ export type QueueStatus = {
   attempts: number;
   next_attempt_at: number;
   last_error: string | null;
+  claimed_at: number | null;
 };
 
 export type ReadyRecord = {
@@ -47,7 +48,8 @@ const SCHEMA_STATEMENTS = [
     next_attempt_at  INTEGER NOT NULL,
     last_error       TEXT,
     created_at       INTEGER NOT NULL,
-    cache_evicted    INTEGER NOT NULL DEFAULT 0
+    cache_evicted    INTEGER NOT NULL DEFAULT 0,
+    claimed_at       INTEGER
   )`,
   `CREATE INDEX IF NOT EXISTS ix_outbox_active
     ON outbox (state, next_attempt_at)`,
@@ -61,6 +63,9 @@ export class IngestQueue {
   constructor(path: string) {
     this.db = new Database(path);
     this.db.run("PRAGMA journal_mode = WAL");
+    // Block up to 5s waiting on another writer instead of failing with SQLITE_BUSY.
+    // Matters when multiple router processes share one outbox file.
+    this.db.run("PRAGMA busy_timeout = 5000");
     for (const sql of SCHEMA_STATEMENTS) this.db.run(sql);
   }
 
@@ -91,13 +96,57 @@ export class IngestQueue {
   }
 
   /**
+   * Atomically claim up to `limit` ready records and mark them as
+   * `claimed_at = now`. Returns the claimed batch.
+   *
+   * A row is "ready" when:
+   *   - state is one of ACTIVE_STATES
+   *   - next_attempt_at <= now
+   *   - claimed_at is null OR older than `staleMs` (worker holding the
+   *     claim is presumed dead)
+   *
+   * Implementation is a single UPDATE ... RETURNING so two concurrent
+   * workers (across processes on the same sqlite file) never see the
+   * same record.
+   */
+  claim(now: number, limit: number, staleMs = 60_000): ReadyRecord[] {
+    const placeholders = ACTIVE_STATES.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `UPDATE outbox
+         SET claimed_at = ?
+         WHERE record_id IN (
+           SELECT record_id FROM outbox
+           WHERE state IN (${placeholders})
+             AND next_attempt_at <= ?
+             AND (claimed_at IS NULL OR claimed_at < ?)
+           ORDER BY next_attempt_at ASC, created_at ASC
+           LIMIT ?
+         )
+         RETURNING body_json, state`,
+      )
+      .all(
+        now,
+        ...ACTIVE_STATES,
+        now,
+        now - staleMs,
+        limit,
+      ) as Array<{ body_json: string; state: RecordState }>;
+    return rows.map((r) => ({
+      body: JSON.parse(r.body_json) as IngestBody,
+      state: r.state,
+    }));
+  }
+
+  /**
    * Advance to the next state on success. Resets attempts + clears error.
    */
   advance(record_id: string, newState: RecordState, nextAttemptAt: number): void {
     this.db
       .prepare(
         `UPDATE outbox
-         SET state = ?, attempts = 0, next_attempt_at = ?, last_error = NULL
+         SET state = ?, attempts = 0, next_attempt_at = ?,
+             last_error = NULL, claimed_at = NULL
          WHERE record_id = ?`,
       )
       .run(newState, nextAttemptAt, record_id);
@@ -105,7 +154,8 @@ export class IngestQueue {
 
   /**
    * Retry the current stage. Increments attempts, sets next_attempt_at,
-   * records error. State unchanged.
+   * records error. State unchanged. Claim is released so another worker
+   * can pick the record up on its next tick.
    */
   markRetry(record_id: string, error: string, nextAttemptAt: number): void {
     this.db
@@ -113,7 +163,8 @@ export class IngestQueue {
         `UPDATE outbox
          SET attempts = attempts + 1,
              next_attempt_at = ?,
-             last_error = ?
+             last_error = ?,
+             claimed_at = NULL
          WHERE record_id = ?`,
       )
       .run(nextAttemptAt, error, record_id);
@@ -128,7 +179,7 @@ export class IngestQueue {
     this.db
       .prepare(
         `UPDATE outbox
-         SET state = ?, last_error = ?
+         SET state = ?, last_error = ?, claimed_at = NULL
          WHERE record_id = ?`,
       )
       .run(finalState, error, record_id);
@@ -137,7 +188,7 @@ export class IngestQueue {
   statusOf(record_id: string): QueueStatus | undefined {
     const row = this.db
       .prepare(
-        `SELECT record_id, state, attempts, next_attempt_at, last_error
+        `SELECT record_id, state, attempts, next_attempt_at, last_error, claimed_at
          FROM outbox WHERE record_id = ?`,
       )
       .get(record_id) as QueueStatus | null;
