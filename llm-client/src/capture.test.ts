@@ -26,7 +26,7 @@ function makeStreamingResponse(chunks: string[], opts: ResponseInit = {}) {
   });
 }
 
-test("captureChat: non-streaming response — clientResponse byte-exact + blob holds request + response", async () => {
+test("captureChat: non-streaming response — clientResponse byte-exact + blob holds request + response as parsed objects", async () => {
   const requestText = '{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}';
   const responseText = '{"id":"chatcmpl-xyz","choices":[{"message":{"content":"hello"}}]}';
 
@@ -41,14 +41,23 @@ test("captureChat: non-streaming response — clientResponse byte-exact + blob h
 
   const result = await captureP;
   const blob = JSON.parse(dec(result.blob_bytes));
-  expect(blob.request_text).toBe(requestText);
-  expect(blob.response_text).toBe(responseText);
+  expect(blob.request).toEqual({
+    model: "gpt-4o",
+    messages: [{ role: "user", content: "hi" }],
+  });
+  expect(blob.response).toEqual({
+    id: "chatcmpl-xyz",
+    choices: [{ message: { content: "hello" } }],
+  });
   expect(blob.upstream_status).toBe(200);
   expect(typeof blob.ts).toBe("string");
   expect(result.record_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+
+  // Blob is pretty-printed so it's readable in jbox / an editor.
+  expect(dec(result.blob_bytes)).toContain('\n  "request":');
 });
 
-test("captureChat: streaming response — clientResponse byte-for-byte + blob has concatenated SSE text", async () => {
+test("captureChat: streaming response — clientResponse byte-for-byte + blob has raw SSE text", async () => {
   const chunks = [
     'data: {"choices":[{"delta":{"content":"hel"}}]}\n\n',
     'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n',
@@ -63,8 +72,14 @@ test("captureChat: streaming response — clientResponse byte-for-byte + blob ha
 
   const result = await captureP;
   const blob = JSON.parse(dec(result.blob_bytes));
-  expect(blob.response_text).toBe(chunks.join(""));
-  expect(blob.request_text).toBe(requestText);
+  // SSE isn't JSON; response stays a string so the raw stream is preserved.
+  expect(blob.response).toBe(chunks.join(""));
+  // Request is always a JSON object.
+  expect(blob.request).toEqual({
+    model: "gpt-4o",
+    stream: true,
+    messages: [],
+  });
 });
 
 test("captureChat: blob_hash equals sha256(blob_bytes)", async () => {
@@ -77,14 +92,15 @@ test("captureChat: blob_hash equals sha256(blob_bytes)", async () => {
   expect(result.blob_size).toBe(result.blob_bytes.byteLength);
 });
 
-test("captureChat: 204 / empty body — captures empty response_text without hanging", async () => {
+test("captureChat: 204 / empty body — captures empty response without hanging", async () => {
   const upstreamRes = new Response(null, { status: 204 });
   const { clientResponse, captureP } = captureChat(enc("x"), upstreamRes);
   expect(clientResponse.status).toBe(204);
 
   const result = await captureP;
   const blob = JSON.parse(dec(result.blob_bytes));
-  expect(blob.response_text).toBe("");
+  // Empty body isn't valid JSON; response stays as the empty string.
+  expect(blob.response).toBe("");
   expect(blob.upstream_status).toBe(204);
 });
 
@@ -101,5 +117,5 @@ test("captureChat: still captures full response even if client cancels mid-strea
 
   const result = await captureP;
   const blob = JSON.parse(dec(result.blob_bytes));
-  expect(blob.response_text).toBe(chunks.join(""));
+  expect(blob.response).toBe(chunks.join(""));
 });

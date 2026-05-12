@@ -105,8 +105,8 @@ test("POST /v1/chat/completions fires onCapture in background with full blob", a
 
   expect(captured).toBeDefined();
   const blob = JSON.parse(new TextDecoder().decode(captured!.blob_bytes));
-  expect(blob.request_text).toBe('{"model":"gpt-4o","messages":[]}');
-  expect(blob.response_text).toBe('{"id":"y","model":"gpt-4o"}');
+  expect(blob.request).toEqual({ model: "gpt-4o", messages: [] });
+  expect(blob.response).toEqual({ id: "y", model: "gpt-4o" });
   expect(blob.upstream_status).toBe(200);
 });
 
@@ -151,5 +151,5 @@ test("/v1/chat/completions streams response while still capturing", async () => 
   await Bun.sleep(10);
   expect(captured).toBeDefined();
   const blob = JSON.parse(new TextDecoder().decode(captured!.blob_bytes));
-  expect(blob.response_text).toBe(chunks.join(""));
+  expect(blob.response).toBe(chunks.join(""));
 });

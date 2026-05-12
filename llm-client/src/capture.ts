@@ -72,19 +72,24 @@ function buildResult(args: {
   responseChunks: Uint8Array[];
   upstream_status: number;
 }): CaptureResult {
-  const response_text = decodeBytes(concatChunks(args.responseChunks));
-  const request_text = decodeBytes(args.requestBytes);
-  // Field order is deliberate: changing it changes the hash, so it's
-  // pinned via the literal here. JSON.stringify preserves insertion
-  // order for plain objects in V8/JSC/Bun.
+  const responseText = decodeBytes(concatChunks(args.responseChunks));
+  const requestText = decodeBytes(args.requestBytes);
+
+  // Parse JSON when possible so the on-disk blob is directly human-readable
+  // (no nested-JSON-string escaping). Streaming responses fall back to the
+  // raw SSE text. Request is always JSON for OpenAI Chat Completions, but
+  // we still tryParse defensively.
   const blob = {
     record_id: args.record_id,
     ts: args.ts.toISOString(),
     upstream_status: args.upstream_status,
-    request_text,
-    response_text,
+    request: tryParseJSON(requestText),
+    response: tryParseJSON(responseText),
   };
-  const blob_bytes = new TextEncoder().encode(JSON.stringify(blob));
+
+  // Pretty-print so opening the file in jbox / a text editor reads cleanly.
+  // The hash binds to this exact byte representation (key order + indent).
+  const blob_bytes = new TextEncoder().encode(JSON.stringify(blob, null, 2));
   const hasher = new Bun.CryptoHasher("sha256");
   hasher.update(blob_bytes);
   const blob_hash = hasher.digest() as Uint8Array;
@@ -95,6 +100,19 @@ function buildResult(args: {
     blob_hash,
     blob_size: blob_bytes.byteLength,
   };
+}
+
+/**
+ * Parse `s` as JSON if it is valid JSON; otherwise return the original
+ * string. Used so the captured blob holds structured request/response
+ * objects when possible (instead of opaque escaped strings).
+ */
+function tryParseJSON(s: string): unknown {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return s;
+  }
 }
 
 function decodeBytes(bytes: Uint8Array): string {
