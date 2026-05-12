@@ -13,8 +13,9 @@ import { syncBlob, makeWebDAVPut, type WebDAVPutLike } from "./sync";
 import { writeAtomic, bytesToHex, redactToken } from "./util";
 import { startEvictionLoop } from "./eviction";
 import type { CaptureResult } from "./capture";
+import pkg from "../package.json" with { type: "json" };
 
-const ROUTER_VERSION = "0.0.0";
+const ROUTER_VERSION = pkg.version;
 
 function expandHome(p: string): string {
   return p.startsWith("~/") || p === "~" ? join(homedir(), p.slice(1)) : p;
@@ -106,7 +107,14 @@ async function main() {
   });
 
   if (values.help) {
-    console.log("Usage: aimdware-router [--config <path>]");
+    console.log(`aimdware-router ${ROUTER_VERSION}
+
+Usage:
+  aimdware-router --config <path>          start the router
+  aimdware-router --help                   show this message
+
+The config file is a YAML doc. See aimdware.example.yaml for the
+expected fields (student_token, course, backend_url, tbox_*, upstream).`);
     return;
   }
 
