@@ -38,8 +38,8 @@ export type ReadyRecord = {
   state: RecordState;
 };
 
-const SCHEMA = `
-  CREATE TABLE IF NOT EXISTS outbox (
+const SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS outbox (
     record_id        TEXT PRIMARY KEY,
     body_json        TEXT NOT NULL,
     state            TEXT NOT NULL,
@@ -48,20 +48,20 @@ const SCHEMA = `
     last_error       TEXT,
     created_at       INTEGER NOT NULL,
     cache_evicted    INTEGER NOT NULL DEFAULT 0
-  );
-  CREATE INDEX IF NOT EXISTS ix_outbox_active
-    ON outbox (state, next_attempt_at);
-  CREATE INDEX IF NOT EXISTS ix_outbox_evictable
-    ON outbox (state, cache_evicted, created_at);
-`;
+  )`,
+  `CREATE INDEX IF NOT EXISTS ix_outbox_active
+    ON outbox (state, next_attempt_at)`,
+  `CREATE INDEX IF NOT EXISTS ix_outbox_evictable
+    ON outbox (state, cache_evicted, created_at)`,
+];
 
 export class IngestQueue {
   private db: Database;
 
   constructor(path: string) {
     this.db = new Database(path);
-    this.db.exec("PRAGMA journal_mode = WAL;");
-    this.db.exec(SCHEMA);
+    this.db.run("PRAGMA journal_mode = WAL");
+    for (const sql of SCHEMA_STATEMENTS) this.db.run(sql);
   }
 
   enqueue(body: IngestBody, nextAttemptAt: number): void {
@@ -119,9 +119,7 @@ export class IngestQueue {
       .run(nextAttemptAt, error, record_id);
   }
 
-  /**
-   * Terminal failure (conflict | fatal). No further work attempted.
-   */
+  /** Mark a terminal failure (conflict | fatal). No further work attempted. */
   markTerminal(
     record_id: string,
     finalState: "conflict" | "fatal",
@@ -147,8 +145,8 @@ export class IngestQueue {
   }
 
   /**
-   * Done records whose cache file is older than the threshold and not yet
-   * evicted. Cap by limit.
+   * Return done records whose cache file is older than the threshold and
+   * not yet evicted. Capped by `limit`.
    */
   findEvictable(olderThanCreatedAt: number, limit: number): string[] {
     const rows = this.db
@@ -170,7 +168,7 @@ export class IngestQueue {
       .run(record_id);
   }
 
-  /** Did we already free this record's cache file? */
+  /** Check whether the cache file for this record has been freed. */
   isEvicted(record_id: string): boolean {
     const row = this.db
       .prepare(`SELECT cache_evicted FROM outbox WHERE record_id = ?`)

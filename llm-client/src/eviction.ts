@@ -19,9 +19,9 @@ const DEFAULT_TTL_MS = 7 * 24 * 3600 * 1000;
 const DEFAULT_LIMIT = 500;
 
 /**
- * One eviction pass. Deletes records/{id}.json for done records older than
- * ttlMs, then marks the queue row as cache_evicted = 1. Idempotent: a
- * missing file still gets the row marked.
+ * Run one eviction pass. Deletes `records/{id}.json` for done records
+ * older than `ttlMs`, then marks the queue row as `cache_evicted = 1`.
+ * Idempotent: a missing file still gets the row marked.
  *
  * The queue row itself is never deleted — it remains as a local audit
  * trail. Eventual queue cleanup is a separate admin concern.
