@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     # TT-side jaccount that has been granted read permission on student
     # folders.
     tbox_url: str = "http://127.0.0.1:8089"
+    tbox_user: str = ""
+    tbox_pass: str = ""
 
 
 settings = Settings()

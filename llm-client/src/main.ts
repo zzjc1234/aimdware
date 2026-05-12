@@ -126,7 +126,12 @@ async function main() {
   const queueDb = join(cacheDir, "queue.db");
 
   const queue = new IngestQueue(queueDb);
-  const webdavPut = makeWebDAVPut(config.tbox_url);
+  const webdavPut = makeWebDAVPut(
+    config.tbox_url,
+    config.tbox_user
+      ? { username: config.tbox_user, password: config.tbox_pass }
+      : undefined,
+  );
 
   const handler = createHandler({
     upstream: {

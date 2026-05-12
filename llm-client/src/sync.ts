@@ -34,13 +34,28 @@ export async function syncBlob(
   }
 }
 
+export type WebDAVAuth = { username: string; password: string };
+
 /**
  * Build a webdav-package-backed PUT function bound to a Tbox URL.
+ *
+ * Lazily MKCOLs parent directories the first time a blob targets them.
+ * Tbox returns 409 on PUT into a missing parent, so without this every
+ * sync would fail until something else created the course folder.
  */
-export function makeWebDAVPut(tboxUrl: string): WebDAVPutLike {
-  const client: WebDAVClient = createClient(tboxUrl);
+export function makeWebDAVPut(tboxUrl: string, auth?: WebDAVAuth): WebDAVPutLike {
+  const client: WebDAVClient = createClient(
+    tboxUrl,
+    auth ? { username: auth.username, password: auth.password } : undefined,
+  );
+  const ensuredDirs = new Set<string>();
   return async (path, data) => {
-    // webdav expects Buffer | string | Readable. Convert Uint8Array.
+    const slash = path.lastIndexOf("/");
+    const parent = slash > 0 ? path.slice(0, slash) : "";
+    if (parent && !ensuredDirs.has(parent)) {
+      await client.createDirectory(parent, { recursive: true });
+      ensuredDirs.add(parent);
+    }
     const buf = Buffer.from(data);
     const ok = await client.putFileContents(path, buf, { overwrite: true });
     if (!ok) throw new Error("webdav putFileContents returned false");

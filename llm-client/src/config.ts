@@ -16,6 +16,8 @@ const RawConfigSchema = z.object({
   jbox_remote_path: z.string().optional(),
   backend_url: z.string().min(1, "backend_url is required"),
   tbox_url: z.string().default("http://127.0.0.1:8089"),
+  tbox_user: z.string().default(""),
+  tbox_pass: z.string().default(""),
 });
 
 export type Config = z.infer<typeof RawConfigSchema> & {

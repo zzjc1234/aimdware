@@ -19,16 +19,22 @@ class JboxNotFound(Exception):
 class TboxWebDAVReader:
     """Fetch blobs from a Tbox WebDAV endpoint (default: backend-side Tbox)."""
 
-    def __init__(self, base_url: str, timeout_s: float = 10.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        timeout_s: float = 10.0,
+        auth: tuple[str, str] | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout_s
+        self._auth = auth
 
     async def get(self, blob_uri: str) -> bytes:
         # blob_uri stored as a relative path (e.g. "aimdware/ECE4721J/<id>.json").
         # Strip a leading slash so urljoin doesn't drop our base path.
         path = blob_uri.lstrip("/")
         url = f"{self._base_url}/{path}"
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        async with httpx.AsyncClient(timeout=self._timeout, auth=self._auth) as client:
             response = await client.get(url)
         if response.status_code == 404:
             raise JboxNotFound(f"blob not found at {url}")
@@ -40,4 +46,9 @@ def default_reader() -> JboxReader:
     """Build the default reader from settings."""
     from aimdware_backend.settings import settings
 
-    return TboxWebDAVReader(settings.tbox_url)
+    auth = (
+        (settings.tbox_user, settings.tbox_pass)
+        if settings.tbox_user
+        else None
+    )
+    return TboxWebDAVReader(settings.tbox_url, auth=auth)
