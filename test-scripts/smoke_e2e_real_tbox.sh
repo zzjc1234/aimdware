@@ -16,7 +16,7 @@
 #   AIMDWARE_TBOX_USER  (default admin)
 #   AIMDWARE_TBOX_PASS  (default admin)
 #
-# Run from the repo root:  ./scripts/smoke_e2e_real_tbox.sh
+# Run from the repo root:  ./test-scripts/smoke_e2e_real_tbox.sh
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"

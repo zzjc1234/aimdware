@@ -3,7 +3,7 @@
 # Verifies a chat request lands as a ContextRecord in the backend DB
 # with blob_status=uploaded.
 #
-# Run from the repo root:  ./scripts/smoke_e2e.sh
+# Run from the repo root:  ./test-scripts/smoke_e2e.sh
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
