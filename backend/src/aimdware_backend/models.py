@@ -80,6 +80,11 @@ class ContextRecord(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="users.id", index=True)
     course_id: UUID = Field(foreign_key="courses.id", index=True)
+    # Session this record belongs to. Multiple records can share a session
+    # (each agent turn = one record, all sharing one session_id and one
+    # blob_uri). New session for one-off chats too — they're a session of 1.
+    session_id: UUID = Field(index=True)
+    turn_count: int = Field(default=1)
     ts: datetime = Field(default_factory=utcnow, index=True)
     model: str
     prompt_tokens: int = 0

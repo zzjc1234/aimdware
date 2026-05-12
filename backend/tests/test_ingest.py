@@ -50,6 +50,8 @@ def enrolled_student(session: Session) -> tuple[str, User, Course]:
 def _body(course_code: str = "ECE4721J", **overrides) -> dict:
     base = {
         "record_id": str(uuid4()),
+        "session_id": str(uuid4()),
+        "turn_count": 1,
         "course_code": course_code,
         "blob_hash": "ab" * 32,
         "blob_uri": "aimdware/ECE4721J/abc.json",

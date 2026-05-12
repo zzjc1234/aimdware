@@ -36,6 +36,8 @@ def _make_client(engine: Engine, reader: JboxReader) -> TestClient:
 
 
 def _seed_record(session: Session, payload: bytes) -> ContextRecord:
+    from uuid import uuid4
+
     user = User(display_name="A", email="a@x", jaccount="a")
     course = Course(code="ECE4721J", title="t", semester="s")
     session.add_all([user, course])
@@ -43,6 +45,8 @@ def _seed_record(session: Session, payload: bytes) -> ContextRecord:
     rec = ContextRecord(
         user_id=user.id,
         course_id=course.id,
+        session_id=uuid4(),
+        turn_count=1,
         model="gpt-4o-mini",
         router_version="0.0.0",
         blob_uri="aimdware/ECE4721J/sample.json",
@@ -188,3 +192,90 @@ def test_payload_endpoint_does_not_mutate_status(
 
     session.refresh(rec)
     assert rec.blob_status == original_status
+
+
+# ---------- session-level payload endpoint ----------
+
+
+def _seed_session(
+    session: Session, *, turns: list[bytes]
+) -> tuple[list[ContextRecord], bytes]:
+    """Seed a session with `len(turns)` records. The session's "current blob"
+    on jbox is the last entry of `turns` — that's what _make_client's reader
+    should return. Each record's stored blob_hash is the sha256 of its
+    corresponding turn payload (i.e. what was hashed at capture time)."""
+    from uuid import uuid4
+
+    user = User(display_name="A", email="a@x", jaccount="a")
+    course = Course(code="ECE4721J", title="t", semester="s")
+    session.add_all([user, course])
+    session.commit()
+    sess_id = uuid4()
+    records: list[ContextRecord] = []
+    for i, payload in enumerate(turns, start=1):
+        rec = ContextRecord(
+            user_id=user.id,
+            course_id=course.id,
+            session_id=sess_id,
+            turn_count=i,
+            model="gpt-4o-mini",
+            router_version="0.0.0",
+            blob_uri=f"aimdware/ECE4721J/{sess_id}.json",
+            blob_hash=hashlib.sha256(payload).digest(),
+            blob_size=len(payload),
+        )
+        session.add(rec)
+        session.commit()
+        session.refresh(rec)
+        records.append(rec)
+    return records, turns[-1]
+
+
+def test_session_payload_verifies_against_latest_turn_hash(
+    engine: Engine, session: Session
+) -> None:
+    turns = [b'{"turn":1}', b'{"turn":2}', b'{"turn":3}']
+    records, current_on_jbox = _seed_session(session, turns=turns)
+    sess_id = records[0].session_id
+
+    client = _make_client(engine, _StaticReader(current_on_jbox))
+    r = client.get(f"/admin/session/{sess_id}/payload", headers=_auth())
+    assert r.status_code == 200
+    body = r.json()
+    assert body["session_id"] == str(sess_id)
+    assert body["turn_count"] == 3
+    assert body["latest_record_id"] == str(records[-1].id)
+    assert body["verified"] is True
+    assert body["payload_utf8"] == current_on_jbox.decode()
+
+
+def test_session_payload_404_when_session_unknown(
+    engine: Engine, session: Session
+) -> None:
+    client = _make_client(engine, _StaticReader(b"x"))
+    r = client.get(f"/admin/session/{uuid4()}/payload", headers=_auth())
+    assert r.status_code == 404
+
+
+def test_context_payload_marks_non_latest_turn(
+    engine: Engine, session: Session
+) -> None:
+    """Pulling an OLD turn's record shows is_latest_turn=False, and
+    verified=False because the on-jbox blob has moved on to a later turn."""
+    turns = [b'{"turn":1}', b'{"turn":2}']
+    records, current_on_jbox = _seed_session(session, turns=turns)
+
+    client = _make_client(engine, _StaticReader(current_on_jbox))
+
+    # Fetch the FIRST turn's record_id but the file on jbox holds turn 2.
+    r = client.get(f"/admin/context/{records[0].id}/payload", headers=_auth())
+    assert r.status_code == 200
+    body = r.json()
+    assert body["is_latest_turn"] is False
+    assert body["verified"] is False  # turn-1 hash != turn-2 on jbox
+
+    # The LATEST turn does verify.
+    r2 = client.get(f"/admin/context/{records[-1].id}/payload", headers=_auth())
+    body2 = r2.json()
+    assert body2["is_latest_turn"] is True
+    assert body2["verified"] is True

@@ -12,7 +12,9 @@ import { postContext, confirmUploaded, type IngestBody } from "./ingest";
 import { syncBlob, makeWebDAVPut, type WebDAVPutLike } from "./sync";
 import { writeAtomic, bytesToHex, redactToken } from "./util";
 import { startEvictionLoop } from "./eviction";
-import type { CaptureResult } from "./capture";
+import { tryParseJSON, decodeBytes } from "./capture";
+import { SessionTracker, type Message } from "./session";
+import { buildSessionBlob } from "./session-blob";
 import pkg from "../package.json" with { type: "json" };
 
 const ROUTER_VERSION = pkg.version;
@@ -21,17 +23,13 @@ function expandHome(p: string): string {
   return p.startsWith("~/") || p === "~" ? join(homedir(), p.slice(1)) : p;
 }
 
-function buildIngestBody(config: Config, r: CaptureResult): IngestBody {
-  return {
-    record_id: r.record_id,
-    course_code: config.course,
-    blob_hash: bytesToHex(r.blob_hash),
-    blob_uri: `${config.jbox_remote_path}/${r.record_id}.json`,
-    blob_size: r.blob_size,
-    ts: r.ts.toISOString(),
-    router_version: ROUTER_VERSION,
-    client_meta: { upstream_type: config.upstream.type },
-  };
+function extractMessages(requestBytes: Uint8Array): Message[] {
+  const parsed = tryParseJSON(decodeBytes(requestBytes));
+  if (parsed && typeof parsed === "object") {
+    const messages = (parsed as { messages?: unknown }).messages;
+    if (Array.isArray(messages)) return messages as Message[];
+  }
+  return [];
 }
 
 function buildStages(
@@ -55,7 +53,9 @@ function buildStages(
   };
 
   const sync: StageHandler = async (body) => {
-    const path = join(cacheDir, "records", `${body.record_id}.json`);
+    // Session-keyed cache file. May have been overwritten by a later turn
+    // of the same session — that's fine; we'll upload the latest state.
+    const path = join(cacheDir, "records", `${body.session_id}.json`);
     let data: Uint8Array;
     try {
       data = new Uint8Array(await Bun.file(path).arrayBuffer());
@@ -134,6 +134,7 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
   const queueDb = join(cacheDir, "queue.db");
 
   const queue = new IngestQueue(queueDb);
+  const sessionTracker = new SessionTracker();
   const webdavPut = makeWebDAVPut(
     config.tbox_url,
     config.tbox_user
@@ -147,21 +148,48 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
       api_key: config.upstream.api_key,
     },
     onCapture: async (result) => {
-      const blobPath = join(recordsDir, `${result.record_id}.json`);
+      const messages = extractMessages(result.request_bytes);
+      const cls = sessionTracker.classify(messages, result.ts);
+
+      const blob = buildSessionBlob({
+        session_id: cls.session_id,
+        course: config.course,
+        started_at: cls.started_at,
+        latest_ts: result.ts,
+        turn_count: cls.turn_count,
+        upstream_type: config.upstream.type,
+        upstream_status: result.upstream_status,
+        request_bytes: result.request_bytes,
+        response_bytes: result.response_bytes,
+      });
+
+      const blobPath = join(recordsDir, `${cls.session_id}.json`);
       try {
-        await writeAtomic(blobPath, result.blob_bytes);
+        await writeAtomic(blobPath, blob.blob_bytes);
       } catch (e) {
         console.error(
-          `cache write failed for ${result.record_id}:`,
+          `cache write failed for record=${result.record_id} session=${cls.session_id}:`,
           (e as Error).message,
         );
-        return; // don't enqueue if we can't preserve the blob
+        return;
       }
-      const body = buildIngestBody(config, result);
+
+      const body: IngestBody = {
+        record_id: result.record_id,
+        session_id: cls.session_id,
+        turn_count: cls.turn_count,
+        course_code: config.course,
+        blob_hash: bytesToHex(blob.blob_hash),
+        blob_uri: `${config.jbox_remote_path}/${cls.session_id}.json`,
+        blob_size: blob.blob_size,
+        ts: result.ts.toISOString(),
+        router_version: ROUTER_VERSION,
+        client_meta: { upstream_type: config.upstream.type },
+      };
       queue.enqueue(body, Date.now());
-      const hex = bytesToHex(result.blob_hash).slice(0, 16);
+      const hex = bytesToHex(blob.blob_hash).slice(0, 16);
       console.log(
-        `captured record=${result.record_id} hash=${hex}… size=${result.blob_size} -> queued`,
+        `captured record=${result.record_id} session=${cls.session_id} turn=${cls.turn_count} hash=${hex}… size=${blob.blob_size} -> queued`,
       );
     },
   });

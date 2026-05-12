@@ -3,6 +3,8 @@ import type { FetchLike } from "./proxy";
 
 export type IngestBody = {
   record_id: string;
+  session_id: string;
+  turn_count: number;
   course_code: string;
   blob_hash: string;
   blob_uri: string;

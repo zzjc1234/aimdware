@@ -41,9 +41,13 @@ UPSTREAM_PORT="$((20000 + RANDOM % 30000))"
 cleanup() {
   echo "--- cleanup ---"
   jobs -p | xargs -r kill 2>/dev/null || true
-  # best-effort: clean the Tbox subdir we created
-  curl -sS -u "$TBOX_USER:$TBOX_PASS" -X DELETE "$TBOX_URL/$TBOX_SUBDIR" >/dev/null 2>&1 || true
-  rm -rf "$WORK"
+  if [ -n "${KEEP_TBOX_DATA:-}" ]; then
+    echo "  KEEP_TBOX_DATA=1 — leaving $TBOX_SUBDIR on Tbox and $WORK on disk"
+    echo "  inspect:  curl -u $TBOX_USER:$TBOX_PASS $TBOX_URL/$TBOX_SUBDIR/"
+  else
+    curl -sS -u "$TBOX_USER:$TBOX_PASS" -X DELETE "$TBOX_URL/$TBOX_SUBDIR" >/dev/null 2>&1 || true
+    rm -rf "$WORK"
+  fi
 }
 trap cleanup EXIT
 

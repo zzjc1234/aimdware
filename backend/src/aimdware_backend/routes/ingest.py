@@ -30,6 +30,8 @@ class IngestContextBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     record_id: UUID
+    session_id: UUID
+    turn_count: int = Field(ge=1, default=1)
     course_code: str
     blob_hash: str  # hex-encoded sha256
     blob_uri: str
@@ -106,6 +108,8 @@ def post_context(
         id=body.record_id,
         user_id=user.id,
         course_id=course.id,
+        session_id=body.session_id,
+        turn_count=body.turn_count,
         ts=body.ts,
         model=body.model,
         prompt_tokens=body.prompt_tokens,

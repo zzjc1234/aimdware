@@ -100,6 +100,8 @@ def test_context_record_persists_with_blob_metadata(session: Session) -> None:
     rec = ContextRecord(
         user_id=user.id,
         course_id=course.id,
+        session_id=uuid4(),
+        turn_count=1,
         model="gpt-4o-mini",
         prompt_tokens=10,
         completion_tokens=20,
@@ -129,6 +131,8 @@ def test_context_record_id_is_pk_unique(session: Session) -> None:
     base = dict(
         user_id=user.id,
         course_id=course.id,
+        session_id=uuid4(),
+        turn_count=1,
         model="gpt",
         router_version="0.0.0",
         blob_uri="x.json",

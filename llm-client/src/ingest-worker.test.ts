@@ -21,6 +21,8 @@ function freshQueue() {
 function body(id: string): IngestBody {
   return {
     record_id: id,
+    session_id: `sess-${id}`,
+    turn_count: 1,
     course_code: "ECE4721J",
     blob_hash: "h",
     blob_uri: `jbox://x/${id}.json`,
