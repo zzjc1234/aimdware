@@ -34,7 +34,10 @@ class IngestContextBody(BaseModel):
     blob_hash: str  # hex-encoded sha256
     blob_uri: str
     blob_size: int = Field(ge=0)
-    model: str
+    # Model + token counts are best-effort metadata. The router does not
+    # parse the captured response, so these are optional and may be empty
+    # for v1. Backend can re-derive them by reading the blob from jbox.
+    model: str = ""
     prompt_tokens: int = 0
     completion_tokens: int = 0
     ts: datetime
