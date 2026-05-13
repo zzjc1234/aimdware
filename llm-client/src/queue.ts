@@ -145,6 +145,9 @@ export class IngestQueue {
     const placeholders = ACTIVE_STATES.map(() => "?").join(",");
     const rows = this.db
       .prepare(
+        // The ORDER BY in the subquery influences which rows the UPDATE
+        // grabs, even though SQLite doesn't otherwise honour ORDER inside
+        // an IN clause. Kept for fairness across processes.
         `UPDATE outbox
          SET claimed_at = ?
          WHERE record_id IN (
@@ -244,9 +247,12 @@ export class IngestQueue {
     olderThanCreatedAt: number,
     limit: number,
   ): Array<{ session_id: string; record_ids: string[] }> {
+    // Separator = ASCII unit separator (0x1F). Can't appear in a UUID
+    // record_id, so the split back is safe even if the id format changes.
+    const SEP = "\x1f";
     const rows = this.db
       .prepare(
-        `SELECT session_id, group_concat(record_id, ',') AS record_ids
+        `SELECT session_id, group_concat(record_id, '${SEP}') AS record_ids
          FROM outbox
          WHERE session_id IS NOT NULL
          GROUP BY session_id
@@ -262,7 +268,7 @@ export class IngestQueue {
       }>;
     return rows.map((r) => ({
       session_id: r.session_id,
-      record_ids: r.record_ids.split(","),
+      record_ids: r.record_ids.split(SEP),
     }));
   }
 

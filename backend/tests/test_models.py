@@ -170,3 +170,34 @@ def test_context_record_unique_session_turn(session: Session) -> None:
     session.add(ContextRecord(**base))  # same session_id + turn_count
     with pytest.raises(IntegrityError):
         session.commit()
+
+
+def test_student_token_active_per_user_partial_unique(session: Session) -> None:
+    """Two active tokens (revoked_at IS NULL) for the same user must be
+    rejected. This is the partial unique index that lives only in
+    Alembic 0001 — conftest mirrors it so this test is meaningful."""
+    import hashlib
+
+    user = User(display_name="A", email="a@x", jaccount="a")
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+
+    session.add(
+        StudentToken(
+            user_id=user.id,
+            token_hash=hashlib.sha256(b"t1").digest(),
+            prefix="t1aaaaaa",
+        )
+    )
+    session.commit()
+
+    session.add(
+        StudentToken(
+            user_id=user.id,
+            token_hash=hashlib.sha256(b"t2").digest(),
+            prefix="t2aaaaaa",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()

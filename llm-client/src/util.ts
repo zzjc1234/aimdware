@@ -1,4 +1,16 @@
 import { rename } from "node:fs/promises";
+import { join } from "node:path";
+
+/**
+ * Where the router stages a session's blob on disk before sync.
+ *
+ * Returned path is identical to what `main.ts`'s onCapture writes,
+ * what `buildSyncStage` reads, and what `eviction.ts` unlinks — exactly
+ * three call sites that must agree on the layout, so it lives here.
+ */
+export function sessionBlobPath(cacheDir: string, session_id: string): string {
+  return join(cacheDir, "records", `${session_id}.json`);
+}
 
 /**
  * Write data to `path` atomically: write to a sibling temp file, then rename.

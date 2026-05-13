@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
 from sqlalchemy.pool import StaticPool
 
 # Importing models registers them with SQLModel.metadata so create_all
@@ -25,6 +25,19 @@ def engine() -> Engine:
         poolclass=StaticPool,
     )
     SQLModel.metadata.create_all(e)
+    # SQLModel.metadata can't express the partial unique index that
+    # enforces "one active token per user" — that DDL lives only in
+    # Alembic 0001. Mirror it here so tests see the same constraints as
+    # production. Without this, tests pass vacuously on token-uniqueness
+    # invariants that prod would reject.
+    with e.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "ux_student_tokens_active_per_user "
+                "ON student_tokens (user_id) WHERE revoked_at IS NULL"
+            )
+        )
     return e
 
 

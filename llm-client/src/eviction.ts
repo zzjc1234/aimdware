@@ -1,7 +1,6 @@
-import { join } from "node:path";
 import { unlink } from "node:fs/promises";
 import type { IngestQueue } from "./queue";
-import { StoppableSleep } from "./util";
+import { StoppableSleep, sessionBlobPath } from "./util";
 
 export type EvictionOpts = {
   queue: IngestQueue;
@@ -45,7 +44,7 @@ export async function runEvictionOnce(
   let records_marked = 0;
   for (const s of sessions) {
     try {
-      await unlink(join(opts.cacheDir, "records", `${s.session_id}.json`));
+      await unlink(sessionBlobPath(opts.cacheDir, s.session_id));
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       if (code !== "ENOENT") {

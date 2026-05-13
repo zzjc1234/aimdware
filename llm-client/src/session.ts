@@ -116,7 +116,9 @@ function canonicalize(v: unknown): unknown {
   if (v === null || typeof v !== "object") return v;
   if (Array.isArray(v)) return v.map(canonicalize);
   const src = v as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
+  // Object.create(null) — not {} — so a "__proto__" key writes a regular
+  // property instead of mutating the prototype chain.
+  const out = Object.create(null) as Record<string, unknown>;
   for (const k of Object.keys(src).sort()) out[k] = canonicalize(src[k]);
   return out;
 }

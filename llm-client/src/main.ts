@@ -10,7 +10,7 @@ import { IngestQueue } from "./queue";
 import { startWorkerLoop, type Stages, type StageHandler } from "./ingest-worker";
 import { postContext, confirmUploaded, type IngestBody } from "./ingest";
 import { syncBlob, makeWebDAVPut, type WebDAVPutLike } from "./sync";
-import { writeAtomic, bytesToHex, redactToken } from "./util";
+import { writeAtomic, bytesToHex, redactToken, sessionBlobPath } from "./util";
 import { startEvictionLoop } from "./eviction";
 import { tryParseJSON, decodeBytes } from "./capture";
 import { SessionTracker, type Message } from "./session";
@@ -45,7 +45,7 @@ export function buildSyncStage(
   webdavPut: WebDAVPutLike,
 ): StageHandler {
   return async (body) => {
-    const path = join(cacheDir, "records", `${body.session_id}.json`);
+    const path = sessionBlobPath(cacheDir, body.session_id);
     let data: Uint8Array;
     try {
       data = new Uint8Array(await Bun.file(path).arrayBuffer());
@@ -174,7 +174,7 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
         response_bytes: result.response_bytes,
       });
 
-      const blobPath = join(recordsDir, `${cls.session_id}.json`);
+      const blobPath = sessionBlobPath(cacheDir, cls.session_id);
       try {
         await writeAtomic(blobPath, blob.blob_bytes);
       } catch (e) {
