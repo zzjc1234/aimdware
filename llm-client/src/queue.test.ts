@@ -1,4 +1,5 @@
 import { test, expect, afterEach } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -110,7 +111,6 @@ test("opening a legacy queue.db (no session_id column) auto-migrates without thr
   const dir = mkdtempSync(join(tmpdir(), "aimdware-queue-legacy-"));
   tmpDirs.push(dir);
   const path = join(dir, "queue.db");
-  const Database = require("bun:sqlite").Database;
   const legacy = new Database(path);
   legacy.exec(`
     CREATE TABLE outbox (

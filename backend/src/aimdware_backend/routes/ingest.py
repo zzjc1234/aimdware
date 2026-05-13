@@ -132,7 +132,7 @@ def post_context(
         raise HTTPException(
             status_code=409,
             detail=(
-                "duplicate (session_id, turn_count) — another record already "
+                "duplicate (session_id, turn_count): another record already "
                 "claims this turn of this session"
             ),
         ) from None

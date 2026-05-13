@@ -140,8 +140,7 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
 
   const config = loadConfig(yamlText);
   const cacheDir = expandHome(config.local_cache_dir);
-  const recordsDir = join(cacheDir, "records");
-  await mkdir(recordsDir, { recursive: true });
+  await mkdir(join(cacheDir, "records"), { recursive: true });
   const queueDb = join(cacheDir, "queue.db");
 
   const queue = new IngestQueue(queueDb);
