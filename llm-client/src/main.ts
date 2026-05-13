@@ -32,29 +32,19 @@ function extractMessages(requestBytes: Uint8Array): Message[] {
   return [];
 }
 
-function buildStages(
-  config: Config,
+/**
+ * Read the session's cached blob from disk and PUT it to jbox. The file
+ * is shared across all turns of the session — if a newer turn overwrote
+ * it before this worker fired, that newer state is what gets uploaded.
+ * The older turn's `blob_hash` stored in the backend will then fail
+ * verification against the on-jbox bytes; this is documented in
+ * `BlobStatus`.
+ */
+export function buildSyncStage(
   cacheDir: string,
   webdavPut: WebDAVPutLike,
-): Stages {
-  const ingest: StageHandler = async (body) => {
-    const r = await postContext(config.backend_url, config.student_token, body);
-    switch (r.kind) {
-      case "created":
-      case "exists":
-        return { kind: "advance" };
-      case "conflict":
-        return { kind: "terminal", finalState: "conflict", reason: "body mismatch" };
-      case "fatal":
-        return { kind: "terminal", finalState: "fatal", reason: r.reason };
-      case "retryable":
-        return { kind: "retry", reason: r.reason };
-    }
-  };
-
-  const sync: StageHandler = async (body) => {
-    // Session-keyed cache file. May have been overwritten by a later turn
-    // of the same session — that's fine; we'll upload the latest state.
+): StageHandler {
+  return async (body) => {
     const path = join(cacheDir, "records", `${body.session_id}.json`);
     let data: Uint8Array;
     try {
@@ -70,6 +60,27 @@ function buildStages(
     switch (r.kind) {
       case "synced":
         return { kind: "advance" };
+      case "fatal":
+        return { kind: "terminal", finalState: "fatal", reason: r.reason };
+      case "retryable":
+        return { kind: "retry", reason: r.reason };
+    }
+  };
+}
+
+function buildStages(
+  config: Config,
+  cacheDir: string,
+  webdavPut: WebDAVPutLike,
+): Stages {
+  const ingest: StageHandler = async (body) => {
+    const r = await postContext(config.backend_url, config.student_token, body);
+    switch (r.kind) {
+      case "created":
+      case "exists":
+        return { kind: "advance" };
+      case "conflict":
+        return { kind: "terminal", finalState: "conflict", reason: "body mismatch" };
       case "fatal":
         return { kind: "terminal", finalState: "fatal", reason: r.reason };
       case "retryable":
@@ -93,7 +104,7 @@ function buildStages(
     }
   };
 
-  return { ingest, sync, confirm };
+  return { ingest, sync: buildSyncStage(cacheDir, webdavPut), confirm };
 }
 
 async function main() {

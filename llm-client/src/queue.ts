@@ -42,6 +42,7 @@ export type ReadyRecord = {
 const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS outbox (
     record_id        TEXT PRIMARY KEY,
+    session_id       TEXT,
     body_json        TEXT NOT NULL,
     state            TEXT NOT NULL,
     attempts         INTEGER NOT NULL DEFAULT 0,
@@ -55,6 +56,8 @@ const SCHEMA_STATEMENTS = [
     ON outbox (state, next_attempt_at)`,
   `CREATE INDEX IF NOT EXISTS ix_outbox_evictable
     ON outbox (state, cache_evicted, created_at)`,
+  `CREATE INDEX IF NOT EXISTS ix_outbox_session
+    ON outbox (session_id)`,
 ];
 
 export class IngestQueue {
@@ -67,16 +70,40 @@ export class IngestQueue {
     // Matters when multiple router processes share one outbox file.
     this.db.run("PRAGMA busy_timeout = 5000");
     for (const sql of SCHEMA_STATEMENTS) this.db.run(sql);
+    this.migrateSchema();
+  }
+
+  /**
+   * Idempotently add columns missing on older databases. ALTER TABLE
+   * ADD COLUMN throws on duplicate, so we probe first via PRAGMA.
+   */
+  private migrateSchema(): void {
+    const cols = this.db
+      .prepare("PRAGMA table_info(outbox)")
+      .all() as Array<{ name: string }>;
+    const has = (n: string) => cols.some((c) => c.name === n);
+    if (!has("session_id")) {
+      this.db.run("ALTER TABLE outbox ADD COLUMN session_id TEXT");
+      this.db.run(
+        "CREATE INDEX IF NOT EXISTS ix_outbox_session ON outbox (session_id)",
+      );
+    }
   }
 
   enqueue(body: IngestBody, nextAttemptAt: number): void {
     this.db
       .prepare(
         `INSERT OR IGNORE INTO outbox
-           (record_id, body_json, state, attempts, next_attempt_at, created_at)
-         VALUES (?, ?, 'captured', 0, ?, ?)`,
+           (record_id, session_id, body_json, state, attempts, next_attempt_at, created_at)
+         VALUES (?, ?, ?, 'captured', 0, ?, ?)`,
       )
-      .run(body.record_id, JSON.stringify(body), nextAttemptAt, Date.now());
+      .run(
+        body.record_id,
+        body.session_id,
+        JSON.stringify(body),
+        nextAttemptAt,
+        Date.now(),
+      );
   }
 
   pickReady(now: number, limit: number): ReadyRecord[] {
@@ -196,21 +223,42 @@ export class IngestQueue {
   }
 
   /**
-   * Return done records whose cache file is older than the threshold and
-   * not yet evicted. Capped by `limit`.
+   * Return sessions whose on-disk cache file is safe to delete. A session
+   * is evictable when:
+   *
+   *   - every record in the session has state='done' (no in-flight turns
+   *     that still need to read the file)
+   *   - at least one record still has cache_evicted=0 (otherwise this
+   *     session has already been processed)
+   *   - MAX(created_at) across the session's records is older than the
+   *     threshold (the session is "settled")
+   *
+   * Capped by `limit` SESSIONS (not records). Oldest sessions first.
    */
-  findEvictable(olderThanCreatedAt: number, limit: number): string[] {
+  findEvictableSessions(
+    olderThanCreatedAt: number,
+    limit: number,
+  ): Array<{ session_id: string; record_ids: string[] }> {
     const rows = this.db
       .prepare(
-        `SELECT record_id FROM outbox
-         WHERE state = 'done'
-           AND cache_evicted = 0
-           AND created_at < ?
-         ORDER BY created_at ASC
+        `SELECT session_id, group_concat(record_id, ',') AS record_ids
+         FROM outbox
+         WHERE session_id IS NOT NULL
+         GROUP BY session_id
+         HAVING SUM(CASE WHEN state = 'done' THEN 0 ELSE 1 END) = 0
+            AND SUM(CASE WHEN cache_evicted = 0 THEN 1 ELSE 0 END) > 0
+            AND MAX(created_at) < ?
+         ORDER BY MAX(created_at) ASC
          LIMIT ?`,
       )
-      .all(olderThanCreatedAt, limit) as { record_id: string }[];
-    return rows.map((r) => r.record_id);
+      .all(olderThanCreatedAt, limit) as Array<{
+        session_id: string;
+        record_ids: string;
+      }>;
+    return rows.map((r) => ({
+      session_id: r.session_id,
+      record_ids: r.record_ids.split(","),
+    }));
   }
 
   markEvicted(record_id: string): void {

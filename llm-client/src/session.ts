@@ -101,8 +101,22 @@ function isPrefixOf(prior: Message[], next: Message[]): boolean {
 }
 
 function messagesEqual(a: Message, b: Message): boolean {
-  // JSON.stringify with stable key ordering would be safer; in practice
-  // OpenAI-compatible payloads have stable shapes from the client, so a
-  // naive stringify match is sufficient and avoids a deep-compare dep.
-  return JSON.stringify(a) === JSON.stringify(b);
+  // Stable key ordering matters. Some agent clients round-trip messages
+  // through their own serializers and re-emit with a different key order;
+  // a naive JSON.stringify would treat that as a new session and silently
+  // regress us to O(N²) blob storage.
+  return canonicalStringify(a) === canonicalStringify(b);
+}
+
+function canonicalStringify(v: unknown): string {
+  return JSON.stringify(canonicalize(v));
+}
+
+function canonicalize(v: unknown): unknown {
+  if (v === null || typeof v !== "object") return v;
+  if (Array.isArray(v)) return v.map(canonicalize);
+  const src = v as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(src).sort()) out[k] = canonicalize(src[k]);
+  return out;
 }

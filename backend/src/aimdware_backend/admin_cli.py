@@ -254,6 +254,9 @@ def _cmd_token_list(session: Session, args: argparse.Namespace) -> None:
 
 
 def _cmd_record_list(session: Session, args: argparse.Namespace) -> None:
+    # Reminder: blob_status=uploaded does NOT mean "this record's hash is
+    # currently verifiable on jbox" for non-latest turns of a session.
+    # See BlobStatus docstring in models.py.
     q = select(ContextRecord).order_by(ContextRecord.ts.desc()).limit(args.limit)
     if args.course:
         c = course_get(session, args.course)

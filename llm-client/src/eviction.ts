@@ -8,23 +8,30 @@ export type EvictionOpts = {
   cacheDir: string;
   now?: () => number;
   ttlMs?: number;
+  /** Max sessions to process per pass (not records). */
   limit?: number;
 };
 
 export type EvictionSummary = {
-  evicted: number;
+  sessions_evicted: number;
+  records_marked: number;
 };
 
 const DEFAULT_TTL_MS = 7 * 24 * 3600 * 1000;
 const DEFAULT_LIMIT = 500;
 
 /**
- * Run one eviction pass. Deletes `records/{id}.json` for done records
- * older than `ttlMs`, then marks the queue row as `cache_evicted = 1`.
- * Idempotent: a missing file still gets the row marked.
+ * Run one eviction pass over the cache directory.
  *
- * The queue row itself is never deleted — it remains as a local audit
- * trail. Eventual queue cleanup is a separate admin concern.
+ * The local cache file is keyed by `session_id` (shared across every
+ * turn of an agent run), so eviction operates session-by-session, not
+ * record-by-record. For each settled session past TTL: unlink
+ * `records/<session_id>.json` once and mark every constituent record
+ * `cache_evicted = 1`. ENOENT is tolerated (the file may have been
+ * cleared out-of-band).
+ *
+ * The queue rows themselves are never deleted — they remain as a local
+ * audit trail. Eventual queue cleanup is a separate admin concern.
  */
 export async function runEvictionOnce(
   opts: EvictionOpts,
@@ -34,20 +41,24 @@ export async function runEvictionOnce(
   const limit = opts.limit ?? DEFAULT_LIMIT;
   const threshold = now - ttlMs;
 
-  const ids = opts.queue.findEvictable(threshold, limit);
-  for (const id of ids) {
+  const sessions = opts.queue.findEvictableSessions(threshold, limit);
+  let records_marked = 0;
+  for (const s of sessions) {
     try {
-      await unlink(join(opts.cacheDir, "records", `${id}.json`));
+      await unlink(join(opts.cacheDir, "records", `${s.session_id}.json`));
     } catch (e) {
-      // ENOENT etc. — file already gone, still consider it evicted.
       const code = (e as NodeJS.ErrnoException).code;
       if (code !== "ENOENT") {
-        console.warn(`unlink failed for ${id}:`, (e as Error).message);
+        console.warn(
+          `unlink failed for session ${s.session_id}:`,
+          (e as Error).message,
+        );
       }
     }
-    opts.queue.markEvicted(id);
+    for (const rid of s.record_ids) opts.queue.markEvicted(rid);
+    records_marked += s.record_ids.length;
   }
-  return { evicted: ids.length };
+  return { sessions_evicted: sessions.length, records_marked };
 }
 
 export type EvictionLoopHandle = { stop: () => Promise<void> };

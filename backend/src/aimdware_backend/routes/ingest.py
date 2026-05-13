@@ -137,6 +137,12 @@ def mark_uploaded(
     Scoped to the caller — only the owning student can mark their own
     records. Idempotent: a second call on an already-uploaded record is
     a no-op.
+
+    For multi-turn sessions: every turn calls this endpoint, but the
+    jbox file is shared and gets overwritten on each turn. So an older
+    turn's record can have blob_status=uploaded yet still fail
+    /admin/context/<id>/payload verification (its `blob_hash` describes
+    a snapshot that no longer exists on jbox). See BlobStatus docstring.
     """
     record = session.get(ContextRecord, record_id)
     if record is None or record.user_id != user.id:

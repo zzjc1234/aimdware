@@ -114,6 +114,49 @@ test("empty messages array produces a new session each time", () => {
   expect(a.session_id).not.toBe(b.session_id);
 });
 
+test("key order does not matter — reordered keys on the same message extend the session", () => {
+  // Agents sometimes round-trip messages through their own serializer
+  // and re-emit them with a different key order. If we did naive
+  // JSON.stringify equality, the second turn would look like a new
+  // session and we'd silently lose O(N) blob storage.
+  const tr = new SessionTracker();
+  const first = tr.classify([
+    { role: "assistant", content: "x", name: "bot" } as Message,
+  ]);
+  const second = tr.classify([
+    { name: "bot", content: "x", role: "assistant" } as Message, // same fields, reordered
+    { role: "user", content: "continue" } as Message,
+  ]);
+  expect(second.is_new).toBe(false);
+  expect(second.session_id).toBe(first.session_id);
+  expect(second.turn_count).toBe(2);
+});
+
+test("deeply nested key reorder (tool_calls etc.) still matches", () => {
+  const tr = new SessionTracker();
+  const first = tr.classify([
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        { id: "1", type: "function", function: { name: "ls", arguments: "{}" } },
+      ],
+    } as Message,
+  ]);
+  const second = tr.classify([
+    {
+      tool_calls: [
+        { function: { arguments: "{}", name: "ls" }, type: "function", id: "1" },
+      ],
+      content: null,
+      role: "assistant",
+    } as Message,
+    { role: "tool", content: "a.txt", tool_call_id: "1" } as Message,
+  ]);
+  expect(second.is_new).toBe(false);
+  expect(second.session_id).toBe(first.session_id);
+});
+
 test("messages with structured content (tool_calls etc.) compare correctly", () => {
   const tr = new SessionTracker();
   const a = tr.classify([

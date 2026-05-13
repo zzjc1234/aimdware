@@ -2,6 +2,7 @@ import { test, expect, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Database } from "bun:sqlite";
 import { IngestQueue } from "./queue";
 import type { IngestBody } from "./ingest";
 import { runEvictionOnce } from "./eviction";
@@ -17,150 +18,145 @@ function fresh() {
   return { d, cacheDir, recordsDir, q };
 }
 
-function body(id: string): IngestBody {
+function body(record_id: string, session_id: string, turn_count = 1): IngestBody {
   return {
-    record_id: id,
-    session_id: `sess-${id}`,
-    turn_count: 1,
+    record_id,
+    session_id,
+    turn_count,
     course_code: "ECE4721J",
     blob_hash: "h",
-    blob_uri: `jbox://x/${id}.json`,
+    blob_uri: `jbox://x/${session_id}.json`,
     blob_size: 1,
     ts: "2026-05-12T00:00:00.000Z",
     router_version: "0.0.0",
   };
 }
 
-function setupDoneRecord(
-  q: IngestQueue,
-  recordsDir: string,
-  id: string,
-  createdMs: number,
-) {
-  // bypass enqueue's now() by inserting raw, then advance
-  q.enqueue(body(id), 0);
-  q.advance(id, "ingested", 0);
-  q.advance(id, "synced", 0);
-  q.advance(id, "done", 0);
-  // We need to backdate created_at; use raw sql for the test fixture.
-  const Database = require("bun:sqlite").Database;
-  const raw = new Database(join(recordsDir, "..", "queue.db"));
-  raw.exec(`UPDATE outbox SET created_at = ${createdMs} WHERE record_id = '${id}'`);
+function backdate(cacheDir: string, record_id: string, createdMs: number) {
+  const raw = new Database(join(cacheDir, "queue.db"));
+  raw.exec(`UPDATE outbox SET created_at = ${createdMs} WHERE record_id = '${record_id}'`);
   raw.close();
-  writeFileSync(join(recordsDir, `${id}.json`), `payload-${id}`);
+}
+
+function setupDoneTurn(
+  q: IngestQueue,
+  cacheDir: string,
+  recordsDir: string,
+  record_id: string,
+  session_id: string,
+  turn_count: number,
+  createdMs: number,
+): void {
+  q.enqueue(body(record_id, session_id, turn_count), 0);
+  q.advance(record_id, "ingested", 0);
+  q.advance(record_id, "synced", 0);
+  q.advance(record_id, "done", 0);
+  backdate(cacheDir, record_id, createdMs);
+  // The cache file is keyed by SESSION_ID, not record_id, and is shared
+  // across every turn of the same session.
+  writeFileSync(join(recordsDir, `${session_id}.json`), `payload-${session_id}`);
 }
 
 afterEach(() => {
   for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-test("runEvictionOnce deletes file + marks evicted for done records older than ttl", async () => {
+const NOW = 100_000_000;
+const TTL = 7 * 24 * 3600 * 1000;
+
+test("evicts a single-turn session past TTL: deletes <session_id>.json + marks record", async () => {
   const { cacheDir, recordsDir, q } = fresh();
-  const NOW = 100_000_000;
-  const TTL_MS = 7 * 24 * 3600 * 1000;
-  setupDoneRecord(q, recordsDir, "old", NOW - TTL_MS - 1000); // older than ttl
-  setupDoneRecord(q, recordsDir, "fresh", NOW - 1000);        // within ttl
+  setupDoneTurn(q, cacheDir, recordsDir, "r1", "S1", 1, NOW - TTL - 1000);
 
-  const summary = await runEvictionOnce({
-    queue: q,
-    cacheDir,
-    now: () => NOW,
-    ttlMs: TTL_MS,
-  });
-
-  expect(summary.evicted).toBe(1);
-  expect(existsSync(join(recordsDir, "old.json"))).toBe(false);
-  expect(existsSync(join(recordsDir, "fresh.json"))).toBe(true);
-  expect(q.isEvicted("old")).toBe(true);
-  expect(q.isEvicted("fresh")).toBe(false);
+  const summary = await runEvictionOnce({ queue: q, cacheDir, now: () => NOW, ttlMs: TTL });
+  expect(summary.sessions_evicted).toBe(1);
+  expect(existsSync(join(recordsDir, "S1.json"))).toBe(false);
+  expect(q.isEvicted("r1")).toBe(true);
   q.close();
 });
 
-test("runEvictionOnce ignores records not in 'done' state", async () => {
+test("evicts a multi-turn session ONCE: deletes one file, marks all N records", async () => {
   const { cacheDir, recordsDir, q } = fresh();
-  const NOW = 100_000_000;
-  const TTL_MS = 7 * 24 * 3600 * 1000;
-  // captured / ingested / synced — even if old, do not evict
-  q.enqueue(body("a"), 0);
-  q.enqueue(body("b"), 0);
-  q.advance("b", "ingested", 0);
-  q.enqueue(body("c"), 0);
-  q.advance("c", "ingested", 0);
-  q.advance("c", "synced", 0);
-  for (const id of ["a", "b", "c"]) {
-    const raw = new (require("bun:sqlite").Database)(join(cacheDir, "queue.db"));
-    raw.exec(`UPDATE outbox SET created_at = ${NOW - TTL_MS - 1000} WHERE record_id = '${id}'`);
-    raw.close();
-    writeFileSync(join(recordsDir, `${id}.json`), "x");
-  }
+  setupDoneTurn(q, cacheDir, recordsDir, "r1", "S-multi", 1, NOW - TTL - 3000);
+  setupDoneTurn(q, cacheDir, recordsDir, "r2", "S-multi", 2, NOW - TTL - 2000);
+  setupDoneTurn(q, cacheDir, recordsDir, "r3", "S-multi", 3, NOW - TTL - 1000);
 
-  const summary = await runEvictionOnce({
-    queue: q,
-    cacheDir,
-    now: () => NOW,
-    ttlMs: TTL_MS,
-  });
-
-  expect(summary.evicted).toBe(0);
-  for (const id of ["a", "b", "c"]) {
-    expect(existsSync(join(recordsDir, `${id}.json`))).toBe(true);
-  }
+  const summary = await runEvictionOnce({ queue: q, cacheDir, now: () => NOW, ttlMs: TTL });
+  expect(summary.sessions_evicted).toBe(1);
+  expect(existsSync(join(recordsDir, "S-multi.json"))).toBe(false);
+  for (const r of ["r1", "r2", "r3"]) expect(q.isEvicted(r)).toBe(true);
   q.close();
 });
 
-test("runEvictionOnce idempotent when file is already missing", async () => {
+test("does NOT evict a session that still has in-flight turns", async () => {
   const { cacheDir, recordsDir, q } = fresh();
-  const NOW = 100_000_000;
-  const TTL_MS = 7 * 24 * 3600 * 1000;
-  setupDoneRecord(q, recordsDir, "ghost", NOW - TTL_MS - 1000);
-  rmSync(join(recordsDir, "ghost.json")); // simulate the file having been removed by hand
+  // r1 is done + old; r2 is still captured (in progress)
+  setupDoneTurn(q, cacheDir, recordsDir, "r1", "S-live", 1, NOW - TTL - 2000);
+  q.enqueue(body("r2", "S-live", 2), 0);
+  backdate(cacheDir, "r2", NOW - TTL - 1000);
+  // File still in use by the live turn — must NOT be deleted.
 
-  const summary = await runEvictionOnce({
-    queue: q,
-    cacheDir,
-    now: () => NOW,
-    ttlMs: TTL_MS,
-  });
-
-  // Still counted as evicted; the row's cache_evicted flag is what we trust.
-  expect(summary.evicted).toBe(1);
-  expect(q.isEvicted("ghost")).toBe(true);
+  const summary = await runEvictionOnce({ queue: q, cacheDir, now: () => NOW, ttlMs: TTL });
+  expect(summary.sessions_evicted).toBe(0);
+  expect(existsSync(join(recordsDir, "S-live.json"))).toBe(true);
+  expect(q.isEvicted("r1")).toBe(false);
+  expect(q.isEvicted("r2")).toBe(false);
   q.close();
 });
 
-test("runEvictionOnce skips records already marked cache_evicted", async () => {
+test("does NOT evict when the latest turn is still within TTL", async () => {
   const { cacheDir, recordsDir, q } = fresh();
-  const NOW = 100_000_000;
-  const TTL_MS = 7 * 24 * 3600 * 1000;
-  setupDoneRecord(q, recordsDir, "already", NOW - TTL_MS - 1000);
-  q.markEvicted("already");
-  rmSync(join(recordsDir, "already.json"));
-
-  const summary = await runEvictionOnce({
-    queue: q,
-    cacheDir,
-    now: () => NOW,
-    ttlMs: TTL_MS,
-  });
-
-  expect(summary.evicted).toBe(0);
+  setupDoneTurn(q, cacheDir, recordsDir, "r1", "S-fresh", 1, NOW - 5_000);
+  setupDoneTurn(q, cacheDir, recordsDir, "r2", "S-fresh", 2, NOW - 1_000);
+  const summary = await runEvictionOnce({ queue: q, cacheDir, now: () => NOW, ttlMs: TTL });
+  expect(summary.sessions_evicted).toBe(0);
+  expect(existsSync(join(recordsDir, "S-fresh.json"))).toBe(true);
   q.close();
 });
 
-test("runEvictionOnce respects limit", async () => {
+test("idempotent: a second pass after a successful eviction is a no-op", async () => {
   const { cacheDir, recordsDir, q } = fresh();
-  const NOW = 100_000_000;
-  const TTL_MS = 7 * 24 * 3600 * 1000;
+  setupDoneTurn(q, cacheDir, recordsDir, "r1", "S1", 1, NOW - TTL - 1000);
+
+  const first = await runEvictionOnce({ queue: q, cacheDir, now: () => NOW, ttlMs: TTL });
+  expect(first.sessions_evicted).toBe(1);
+  const second = await runEvictionOnce({ queue: q, cacheDir, now: () => NOW, ttlMs: TTL });
+  expect(second.sessions_evicted).toBe(0);
+  q.close();
+});
+
+test("tolerates a missing file (already removed out-of-band) — still marks records evicted", async () => {
+  const { cacheDir, recordsDir, q } = fresh();
+  setupDoneTurn(q, cacheDir, recordsDir, "r1", "S-ghost", 1, NOW - TTL - 1000);
+  rmSync(join(recordsDir, "S-ghost.json"));
+
+  const summary = await runEvictionOnce({ queue: q, cacheDir, now: () => NOW, ttlMs: TTL });
+  expect(summary.sessions_evicted).toBe(1);
+  expect(q.isEvicted("r1")).toBe(true);
+  q.close();
+});
+
+test("limit caps the number of sessions per pass", async () => {
+  const { cacheDir, recordsDir, q } = fresh();
   for (let i = 0; i < 5; i++) {
-    setupDoneRecord(q, recordsDir, `r${i}`, NOW - TTL_MS - 1000 - i);
+    setupDoneTurn(q, cacheDir, recordsDir, `r${i}`, `S${i}`, 1, NOW - TTL - 1000 - i);
   }
   const summary = await runEvictionOnce({
-    queue: q,
-    cacheDir,
-    now: () => NOW,
-    ttlMs: TTL_MS,
-    limit: 2,
+    queue: q, cacheDir, now: () => NOW, ttlMs: TTL, limit: 2,
   });
-  expect(summary.evicted).toBe(2);
+  expect(summary.sessions_evicted).toBe(2);
+  q.close();
+});
+
+test("evicts multiple distinct sessions in one pass", async () => {
+  const { cacheDir, recordsDir, q } = fresh();
+  setupDoneTurn(q, cacheDir, recordsDir, "r1", "S-a", 1, NOW - TTL - 1000);
+  setupDoneTurn(q, cacheDir, recordsDir, "r2", "S-b", 1, NOW - TTL - 2000);
+  setupDoneTurn(q, cacheDir, recordsDir, "r3", "S-c", 1, NOW - 1_000); // fresh
+  const summary = await runEvictionOnce({ queue: q, cacheDir, now: () => NOW, ttlMs: TTL });
+  expect(summary.sessions_evicted).toBe(2);
+  expect(existsSync(join(recordsDir, "S-a.json"))).toBe(false);
+  expect(existsSync(join(recordsDir, "S-b.json"))).toBe(false);
+  expect(existsSync(join(recordsDir, "S-c.json"))).toBe(true);
   q.close();
 });

@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, Column, Index, JSON, LargeBinary
+from sqlalchemy import BigInteger, Column, Index, JSON, LargeBinary, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -21,6 +21,18 @@ class Role(str, Enum):
 
 
 class BlobStatus(str, Enum):
+    """Lifecycle of the per-record blob on jbox.
+
+    Note on multi-turn sessions: the blob file is keyed by `session_id`
+    and overwritten on every turn. So `uploaded` on a record means
+    "the router successfully PUT a snapshot for this turn at the time" —
+    NOT "this record's `blob_hash` matches what's currently on jbox".
+    For all turns except the latest of their session, the on-jbox bytes
+    have since moved on; verification will report `verified=false` with
+    `is_latest_turn=false`. Use /admin/session/<id>/payload for the
+    canonical "verify the session's current blob" workflow.
+    """
+
     pending = "pending"
     uploaded = "uploaded"
     verified = "verified"
@@ -76,6 +88,14 @@ class StudentToken(SQLModel, table=True):
 
 class ContextRecord(SQLModel, table=True):
     __tablename__ = "context_records"
+    # Encode the invariant: turn_count is unique within a session. Two
+    # routers writing concurrent records for the same session can never
+    # silently collide on a tiebreaker; the DB will reject the duplicate.
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id", "turn_count", name="ux_context_records_session_turn"
+        ),
+    )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="users.id", index=True)

@@ -144,3 +144,29 @@ def test_context_record_id_is_pk_unique(session: Session) -> None:
     session.add(ContextRecord(id=rec_id, **base))
     with pytest.raises(IntegrityError):
         session.commit()
+
+
+def test_context_record_unique_session_turn(session: Session) -> None:
+    """Two records with the same (session_id, turn_count) must be rejected."""
+    user = User(display_name="A", email="a@x", jaccount="a")
+    course = Course(code="C2", title="t", semester="s")
+    session.add_all([user, course])
+    session.commit()
+
+    sess_id = uuid4()
+    base = dict(
+        user_id=user.id,
+        course_id=course.id,
+        session_id=sess_id,
+        turn_count=1,
+        model="gpt",
+        router_version="0.0.0",
+        blob_uri="x.json",
+        blob_hash=b"\x00" * 32,
+        blob_size=1,
+    )
+    session.add(ContextRecord(**base))
+    session.commit()
+    session.add(ContextRecord(**base))  # same session_id + turn_count
+    with pytest.raises(IntegrityError):
+        session.commit()

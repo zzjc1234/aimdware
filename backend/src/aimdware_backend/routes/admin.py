@@ -29,10 +29,17 @@ def get_jbox_reader() -> JboxReader:
 def _latest_record_for_session(
     session: Session, session_id: UUID
 ) -> ContextRecord | None:
+    # turn_count is monotonically increasing within a session (enforced by
+    # a UNIQUE(session_id, turn_count) DB constraint), but we still tiebreak
+    # on ts.desc() defensively. If two records ever did share a turn_count,
+    # the latest-by-wall-clock is the one we want for verification.
     return session.exec(
         select(ContextRecord)
         .where(ContextRecord.session_id == session_id)
-        .order_by(ContextRecord.turn_count.desc())  # type: ignore[union-attr]
+        .order_by(
+            ContextRecord.turn_count.desc(),  # type: ignore[union-attr]
+            ContextRecord.ts.desc(),  # type: ignore[union-attr]
+        )
     ).first()
 
 
