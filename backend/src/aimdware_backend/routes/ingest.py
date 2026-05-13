@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from aimdware_backend.auth import authenticate_student
@@ -121,7 +122,20 @@ def post_context(
         blob_size=body.blob_size,
     )
     session.add(record)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # The only constraint that can fire here (record_id was checked above)
+        # is UNIQUE(session_id, turn_count). Two routers racing on the same
+        # session/turn with different record_ids land here.
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "duplicate (session_id, turn_count) — another record already "
+                "claims this turn of this session"
+            ),
+        ) from None
     response.status_code = status.HTTP_202_ACCEPTED
     return {"id": str(record.id), "status": "created"}
 

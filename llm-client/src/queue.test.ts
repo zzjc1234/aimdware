@@ -105,6 +105,40 @@ test("enqueue is idempotent on duplicate record_id", () => {
   q.close();
 });
 
+test("opening a legacy queue.db (no session_id column) auto-migrates without throwing", () => {
+  // Simulate a queue.db left over from a pre-session_id router build.
+  const dir = mkdtempSync(join(tmpdir(), "aimdware-queue-legacy-"));
+  tmpDirs.push(dir);
+  const path = join(dir, "queue.db");
+  const Database = require("bun:sqlite").Database;
+  const legacy = new Database(path);
+  legacy.exec(`
+    CREATE TABLE outbox (
+      record_id        TEXT PRIMARY KEY,
+      body_json        TEXT NOT NULL,
+      state            TEXT NOT NULL,
+      attempts         INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at  INTEGER NOT NULL,
+      last_error       TEXT,
+      created_at       INTEGER NOT NULL,
+      cache_evicted    INTEGER NOT NULL DEFAULT 0,
+      claimed_at       INTEGER
+    );
+    INSERT INTO outbox (record_id, body_json, state, attempts, next_attempt_at, created_at)
+    VALUES ('legacy-1', '{}', 'done', 0, 0, 0);
+  `);
+  legacy.close();
+
+  // Opening with the new code must not throw, and must add session_id.
+  const q = new IngestQueue(path);
+  const cols = (q as unknown as { db: { prepare: (s: string) => { all: () => Array<{ name: string }> } } })
+    .db.prepare("PRAGMA table_info(outbox)")
+    .all();
+  expect(cols.some((c) => c.name === "session_id")).toBe(true);
+  expect(q.statusOf("legacy-1")?.state).toBe("done");
+  q.close();
+});
+
 test("state survives reopening the db file", () => {
   const { path, q } = freshDb();
   q.enqueue(body("a"), 0);

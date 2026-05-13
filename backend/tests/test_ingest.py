@@ -225,3 +225,28 @@ def test_mark_uploaded_unknown_id_is_404(
         headers={"Authorization": f"Bearer {plaintext}"},
     )
     assert r.status_code == 404
+
+
+def test_post_context_duplicate_session_turn_returns_409(
+    client: TestClient, enrolled_student: tuple[str, User, Course]
+) -> None:
+    """A second record on the same (session_id, turn_count) — with a
+    different record_id — must be rejected with 409, not a 500.
+
+    This guards the new UNIQUE(session_id, turn_count) DB constraint.
+    """
+    plaintext, _, _ = enrolled_student
+    h = {"Authorization": f"Bearer {plaintext}"}
+    sess = str(uuid4())
+
+    body1 = _body()
+    body1["session_id"] = sess
+    body1["turn_count"] = 1
+    r1 = client.post("/ingest/context", json=body1, headers=h)
+    assert r1.status_code == 202, r1.text
+
+    body2 = _body()  # new record_id, same session/turn
+    body2["session_id"] = sess
+    body2["turn_count"] = 1
+    r2 = client.post("/ingest/context", json=body2, headers=h)
+    assert r2.status_code == 409, r2.text

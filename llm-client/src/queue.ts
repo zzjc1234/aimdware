@@ -56,8 +56,9 @@ const SCHEMA_STATEMENTS = [
     ON outbox (state, next_attempt_at)`,
   `CREATE INDEX IF NOT EXISTS ix_outbox_evictable
     ON outbox (state, cache_evicted, created_at)`,
-  `CREATE INDEX IF NOT EXISTS ix_outbox_session
-    ON outbox (session_id)`,
+  // NOTE: ix_outbox_session is intentionally NOT here — it references
+  // session_id, which may not exist on a legacy DB. The migrateSchema()
+  // step creates the column (idempotently) and then the index.
 ];
 
 export class IngestQueue {
@@ -70,12 +71,14 @@ export class IngestQueue {
     // Matters when multiple router processes share one outbox file.
     this.db.run("PRAGMA busy_timeout = 5000");
     for (const sql of SCHEMA_STATEMENTS) this.db.run(sql);
+    // Migration step must run AFTER the base schema exists but BEFORE
+    // any DDL that depends on added columns (e.g. ix_outbox_session).
     this.migrateSchema();
   }
 
   /**
-   * Idempotently add columns missing on older databases. ALTER TABLE
-   * ADD COLUMN throws on duplicate, so we probe first via PRAGMA.
+   * Idempotently add columns + indexes missing on older databases.
+   * ALTER TABLE ADD COLUMN throws on duplicate, so we probe first via PRAGMA.
    */
   private migrateSchema(): void {
     const cols = this.db
@@ -84,10 +87,12 @@ export class IngestQueue {
     const has = (n: string) => cols.some((c) => c.name === n);
     if (!has("session_id")) {
       this.db.run("ALTER TABLE outbox ADD COLUMN session_id TEXT");
-      this.db.run(
-        "CREATE INDEX IF NOT EXISTS ix_outbox_session ON outbox (session_id)",
-      );
     }
+    // CREATE INDEX IF NOT EXISTS is safe on both legacy and fresh DBs
+    // — by this point session_id is guaranteed to exist.
+    this.db.run(
+      "CREATE INDEX IF NOT EXISTS ix_outbox_session ON outbox (session_id)",
+    );
   }
 
   enqueue(body: IngestBody, nextAttemptAt: number): void {

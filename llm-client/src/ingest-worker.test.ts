@@ -203,14 +203,16 @@ test("multi-turn session: independent records sharing one session_id both advanc
   expect(seen.ingest).toEqual(["t1"]);
   expect(seen.sync).toEqual(["t2"]);
   expect(seen.confirm).toEqual(["t3"]);
-  // All three records carry the same session_id throughout.
-  for (const id of ["t1", "t2", "t3"]) {
-    const stored = JSON.parse(
-      // raw body_json was set by enqueue; confirm session_id stuck.
-      // We don't expose a getter for body_json, so re-derive via pickReady.
-      "{}",
-    );
-    expect(stored).toBeDefined(); // sanity
-  }
+
+  // Round-trip check: body_json stored in the outbox must carry the
+  // shared session_id and the per-turn turn_count. Use a fresh queue so
+  // we can pickReady (the records above have advanced past 'ready').
+  const q2 = freshQueue();
+  q2.enqueue(turn("a", 7), 0);
+  q2.enqueue(turn("b", 8), 0);
+  const bodies = q2.pickReady(2000, 10).map((r) => r.body);
+  expect(bodies.every((b) => b.session_id === "S-agent")).toBe(true);
+  expect(bodies.map((b) => b.turn_count).sort()).toEqual([7, 8]);
   q.close();
+  q2.close();
 });
