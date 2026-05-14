@@ -41,7 +41,8 @@ Bun.serve({
 });
 " >"$WORK/upstream.log" 2>&1 &
 
-# 3. fake Tbox (WebDAV PUT acceptor)
+# 3. fake Tbox (WebDAV PUT acceptor — handles MKCOL too since the router
+# now calls createDirectory(parent, {recursive: true}) before each PUT).
 bun -e "
 Bun.serve({
   port: $TBOX_PORT, hostname: '127.0.0.1',
@@ -51,6 +52,15 @@ Bun.serve({
       const body = await req.arrayBuffer();
       console.log('PUT', u.pathname, body.byteLength);
       return new Response('', { status: 201 });
+    }
+    if (req.method === 'MKCOL') {
+      console.log('MKCOL', u.pathname);
+      return new Response('', { status: 201 });
+    }
+    if (req.method === 'PROPFIND') {
+      // recursive MKCOL probes existence first; pretend nothing exists
+      // so it always proceeds to create.
+      return new Response('', { status: 404 });
     }
     return new Response('', { status: 200, headers: { DAV: '1,2' } });
   }
@@ -108,8 +118,8 @@ curl -sS -X POST "http://127.0.0.1:$ROUTER_PORT/v1/chat/completions" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"smoke"}]}'
 echo
 
-# 8. wait for ingest -> sync -> confirm
-sleep 3
+# 8. wait for ingest -> sync -> confirm (3 stages × ~1s worker poll)
+sleep 8
 
 # 9. inspect db
 echo "--- ContextRecord rows ---"
