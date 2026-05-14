@@ -68,6 +68,7 @@ echo "--- token issued: ${TOKEN:0:8}… ---"
 cat >"$WORK/aimdware.yaml" <<EOF
 student_token: $TOKEN
 course: $COURSE
+assignment: smoke
 upstream:
   type: openai
   base_url: $UPSTREAM_BASE

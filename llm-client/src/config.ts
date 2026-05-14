@@ -10,6 +10,7 @@ const UpstreamSchema = z.object({
 const RawConfigSchema = z.object({
   student_token: z.string().min(1, "student_token is required"),
   course: z.string().min(1, "course is required"),
+  assignment: z.string().min(1, "assignment is required"),
   upstream: UpstreamSchema,
   port: z.number().int().positive().default(12345),
   local_cache_dir: z.string().default("~/.cache/aimdware"),
@@ -29,6 +30,8 @@ export function loadConfig(yamlText: string): Config {
   const parsed = RawConfigSchema.parse(raw);
   return {
     ...parsed,
-    jbox_remote_path: parsed.jbox_remote_path ?? `aimdware/${parsed.course}`,
+    jbox_remote_path:
+      parsed.jbox_remote_path ??
+      `aimdware/${parsed.course}/${parsed.assignment}`,
   };
 }

@@ -98,6 +98,11 @@ class ContextRecord(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="users.id", index=True)
     course_id: UUID = Field(foreign_key="courses.id", index=True)
+    # Free-form assignment label scoped to the course. The TT decides
+    # what this means — homework slug, lab number, exam name, etc.
+    # Captured so audit can filter "what did this student do for hw3".
+    # Not a FK because we don't model assignments as first-class entities.
+    assignment: str = Field(index=True)
     # Session this record belongs to. Multiple records can share a session
     # (each agent turn = one record, all sharing one session_id and one
     # blob_uri). New session for one-off chats too — they're a session of 1.

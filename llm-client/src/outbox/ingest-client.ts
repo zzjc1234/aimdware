@@ -6,6 +6,7 @@ export type IngestBody = {
   session_id: string;
   turn_count: number;
   course_code: string;
+  assignment: string;
   blob_hash: string;
   blob_uri: string;
   blob_size: number;

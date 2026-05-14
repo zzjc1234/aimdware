@@ -28,6 +28,7 @@ function body(
     session_id,
     turn_count,
     course_code: "ECE4721J",
+    assignment: "hw1",
     blob_hash: "h",
     blob_uri: `jbox://x/${session_id}.json`,
     blob_size: 1,

@@ -59,6 +59,7 @@ test("main: serves /healthz and proxies a chat completion end-to-end", async () 
     `
 student_token: st_test
 course: ECE4721J
+assignment: hw1
 upstream:
   base_url: http://127.0.0.1:${fakeUpstream.port}
   api_key: sk-test
@@ -117,6 +118,7 @@ test("main: never prints plaintext student_token or upstream api_key", async () 
     `
 student_token: ${STUDENT}
 course: ECE4721J
+assignment: hw1
 upstream:
   base_url: http://127.0.0.1:${fakeUpstream.port}
   api_key: ${APIKEY}

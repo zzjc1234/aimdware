@@ -3,6 +3,7 @@ import { decodeBytes, tryParseJSON } from "./capture";
 export type SessionBlobInput = {
   session_id: string;
   course: string;
+  assignment: string;
   started_at: Date;
   latest_ts: Date;
   turn_count: number;
@@ -49,6 +50,7 @@ export function buildSessionBlob(input: SessionBlobInput): SessionBlobResult {
   const blob = {
     session_id: input.session_id,
     course: input.course,
+    assignment: input.assignment,
     started_at: input.started_at.toISOString(),
     latest_ts: input.latest_ts.toISOString(),
     turn_count: input.turn_count,

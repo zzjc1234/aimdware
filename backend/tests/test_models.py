@@ -99,6 +99,7 @@ def test_context_record_persists_with_blob_metadata(session: Session) -> None:
     rec = ContextRecord(
         user_id=user.id,
         course_id=course.id,
+        assignment="hw1",
         session_id=uuid4(),
         turn_count=1,
         model="gpt-4o-mini",
@@ -106,7 +107,7 @@ def test_context_record_persists_with_blob_metadata(session: Session) -> None:
         completion_tokens=20,
         router_version="0.0.0",
         client_meta={"agent": "cline"},
-        blob_uri="aimdware/C1/abc.json",
+        blob_uri="aimdware/C1/hw1/abc.json",
         blob_hash=b"\x00" * 32,
         blob_size=12345,
     )
@@ -130,6 +131,7 @@ def test_context_record_id_is_pk_unique(session: Session) -> None:
     base = dict(
         user_id=user.id,
         course_id=course.id,
+        assignment="hw1",
         session_id=uuid4(),
         turn_count=1,
         model="gpt",
@@ -156,6 +158,7 @@ def test_context_record_unique_session_turn(session: Session) -> None:
     base = dict(
         user_id=user.id,
         course_id=course.id,
+        assignment="hw1",
         session_id=sess_id,
         turn_count=1,
         model="gpt",

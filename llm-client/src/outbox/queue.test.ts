@@ -21,6 +21,7 @@ function body(id: string): IngestBody {
     session_id: `sess-${id}`,
     turn_count: 1,
     course_code: "ECE4721J",
+    assignment: "hw1",
     blob_hash: "h",
     blob_uri: `jbox://x/${id}.json`,
     blob_size: 1,

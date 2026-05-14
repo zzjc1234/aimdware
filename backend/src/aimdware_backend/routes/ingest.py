@@ -34,6 +34,7 @@ class IngestContextBody(BaseModel):
     session_id: UUID
     turn_count: int = Field(ge=1, default=1)
     course_code: str
+    assignment: str  # free-form, course-scoped; TT decides the namespace
     blob_hash: str  # hex-encoded sha256
     blob_uri: str
     blob_size: int = Field(ge=0)
@@ -92,6 +93,7 @@ def post_context(
             and existing.blob_size == body.blob_size
             and existing.user_id == user.id
             and existing.course_id == course.id
+            and existing.assignment == body.assignment
         )
         if not same:
             raise HTTPException(
@@ -105,6 +107,7 @@ def post_context(
         id=body.record_id,
         user_id=user.id,
         course_id=course.id,
+        assignment=body.assignment,
         session_id=body.session_id,
         turn_count=body.turn_count,
         ts=body.ts,

@@ -51,6 +51,7 @@ function body(
     session_id,
     turn_count,
     course_code: "X",
+    assignment: "hw1",
     blob_hash: "abc",
     blob_uri: `aimdware/X/${session_id}.json`,
     blob_size: 0,

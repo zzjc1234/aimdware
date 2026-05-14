@@ -40,6 +40,7 @@ function sampleBody(): IngestBody {
     session_id: "22222222-2222-2222-2222-222222222222",
     turn_count: 1,
     course_code: "ECE4721J",
+    assignment: "hw1",
     blob_hash: "deadbeef",
     blob_uri: "jbox://zhangsan/aimdware/ECE4721J/x.json",
     blob_size: 123,

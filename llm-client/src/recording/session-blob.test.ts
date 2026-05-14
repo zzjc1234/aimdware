@@ -17,6 +17,7 @@ test("router metadata is at blob root; the whole parsed request lives under `req
   const r = buildSessionBlob({
     session_id: "11111111-2222-3333-4444-555555555555",
     course: "ECE4721J",
+    assignment: "hw1",
     started_at: new Date("2026-05-13T10:00:00Z"),
     latest_ts: new Date("2026-05-13T10:01:00Z"),
     turn_count: 2,
@@ -65,6 +66,7 @@ test("ANY field on the request body is preserved verbatim (future-proof)", () =>
   const r = buildSessionBlob({
     session_id: "x",
     course: "C",
+    assignment: "hw1",
     started_at: new Date(0),
     latest_ts: new Date(0),
     turn_count: 1,
@@ -108,6 +110,7 @@ test("tools + tool_choice round-trip through `request`", () => {
   const r = buildSessionBlob({
     session_id: "x",
     course: "C",
+    assignment: "hw1",
     started_at: new Date(0),
     latest_ts: new Date(0),
     turn_count: 1,
@@ -126,6 +129,7 @@ test("blob is pretty-printed and the hash matches sha256(blob_bytes)", () => {
   const r = buildSessionBlob({
     session_id: "abc",
     course: "X",
+    assignment: "hw1",
     started_at: new Date(0),
     latest_ts: new Date(0),
     turn_count: 1,
@@ -148,6 +152,7 @@ test("streaming SSE response stays as a raw string under `response`", () => {
   const r = buildSessionBlob({
     session_id: "x",
     course: "Y",
+    assignment: "hw1",
     started_at: new Date(0),
     latest_ts: new Date(0),
     turn_count: 1,
@@ -165,6 +170,7 @@ test("unparseable request bytes are kept verbatim under `request` (as a string)"
   const r = buildSessionBlob({
     session_id: "x",
     course: "Y",
+    assignment: "hw1",
     started_at: new Date(0),
     latest_ts: new Date(0),
     turn_count: 1,
@@ -184,6 +190,7 @@ test("two consecutive turns of the same session produce strictly growing blob si
   const turn1 = buildSessionBlob({
     session_id: "s1",
     course: "X",
+    assignment: "hw1",
     started_at: new Date(0),
     latest_ts: new Date(0),
     turn_count: 1,
@@ -197,6 +204,7 @@ test("two consecutive turns of the same session produce strictly growing blob si
   const turn2 = buildSessionBlob({
     session_id: "s1",
     course: "X",
+    assignment: "hw1",
     started_at: new Date(0),
     latest_ts: new Date(1),
     turn_count: 2,

@@ -46,11 +46,12 @@ def _seed_record(session: Session, payload: bytes) -> ContextRecord:
     rec = ContextRecord(
         user_id=user.id,
         course_id=course.id,
+        assignment="hw1",
         session_id=uuid4(),
         turn_count=1,
         model="gpt-4o-mini",
         router_version="0.0.0",
-        blob_uri="aimdware/ECE4721J/sample.json",
+        blob_uri="aimdware/ECE4721J/hw1/sample.json",
         blob_hash=hashlib.sha256(payload).digest(),
         blob_size=len(payload),
     )
@@ -203,11 +204,12 @@ def _seed_session(session: Session, *, turns: list[bytes]) -> tuple[list[Context
         rec = ContextRecord(
             user_id=user.id,
             course_id=course.id,
+            assignment="hw1",
             session_id=sess_id,
             turn_count=i,
             model="gpt-4o-mini",
             router_version="0.0.0",
-            blob_uri=f"aimdware/ECE4721J/{sess_id}.json",
+            blob_uri=f"aimdware/ECE4721J/hw1/{sess_id}.json",
             blob_hash=hashlib.sha256(payload).digest(),
             blob_size=len(payload),
         )

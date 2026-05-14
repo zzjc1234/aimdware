@@ -23,7 +23,11 @@ TBOX_PASS="${AIMDWARE_TBOX_PASS:-admin}"
 
 STAMP="$(date +%s)-$$"
 COURSE="AGENT${STAMP}"
-TBOX_SUBDIR="aimdware/$COURSE"
+ASSIGNMENT="smoke"
+# Blobs land under <course>/<assignment>/; we PROPFIND/DELETE the
+# course parent to cover both the assignment subdir and the dir itself.
+TBOX_COURSE_DIR="aimdware/$COURSE"
+TBOX_ASSIGNMENT_DIR="aimdware/$COURSE/$ASSIGNMENT"
 ADMIN_SECRET="agent-admin-secret-$STAMP"
 
 DB_FILE="$WORK/aimdware.db"
@@ -36,10 +40,10 @@ cleanup() {
   echo "--- cleanup ---"
   jobs -p | xargs -r kill 2>/dev/null || true
   if [ -n "${KEEP_TBOX_DATA:-}" ]; then
-    echo "  KEEP_TBOX_DATA=1 — leaving $TBOX_SUBDIR on Tbox"
-    echo "  inspect:  curl -u $TBOX_USER:$TBOX_PASS $TBOX_URL/$TBOX_SUBDIR/"
+    echo "  KEEP_TBOX_DATA=1 — leaving $TBOX_COURSE_DIR on Tbox"
+    echo "  inspect:  curl -u $TBOX_USER:$TBOX_PASS $TBOX_URL/$TBOX_ASSIGNMENT_DIR/"
   else
-    curl -sS -u "$TBOX_USER:$TBOX_PASS" -X DELETE "$TBOX_URL/$TBOX_SUBDIR" >/dev/null 2>&1 || true
+    curl -sS -u "$TBOX_USER:$TBOX_PASS" -X DELETE "$TBOX_URL/$TBOX_COURSE_DIR" >/dev/null 2>&1 || true
     rm -rf "$WORK"
   fi
 }
@@ -87,6 +91,7 @@ TOKEN="$(cd "$REPO_ROOT/backend" && E2E_COURSE="$COURSE" \
 cat >"$WORK/aimdware.yaml" <<EOF
 student_token: $TOKEN
 course: $COURSE
+assignment: smoke
 upstream:
   base_url: http://127.0.0.1:$UPSTREAM_PORT
   api_key: sk-agent-smoke
@@ -133,9 +138,9 @@ echo "OK: $TOTAL records / $DISTINCT session"
 # jbox: exactly ONE blob file under /aimdware/$COURSE/
 echo
 echo "--- jbox listing (should be ONE file, not three) ---"
-COUNT=$(curl -s -u "$TBOX_USER:$TBOX_PASS" -X PROPFIND -H "Depth: 1" "$TBOX_URL/$TBOX_SUBDIR/" \
+COUNT=$(curl -s -u "$TBOX_USER:$TBOX_PASS" -X PROPFIND -H "Depth: 1" "$TBOX_URL/$TBOX_ASSIGNMENT_DIR/" \
   | grep -oE '<D:href>[^<]+\.json</D:href>' | wc -l | tr -d ' ')
-echo "  json files on jbox under /$TBOX_SUBDIR/: $COUNT"
+echo "  json files on jbox under /$TBOX_ASSIGNMENT_DIR/: $COUNT"
 [ "$COUNT" = "1" ] || { echo "FAIL: expected exactly 1 blob, got $COUNT"; exit 1; }
 
 # Session-level verify endpoint

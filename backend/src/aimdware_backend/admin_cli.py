@@ -252,6 +252,8 @@ def _cmd_record_list(session: Session, args: argparse.Namespace) -> None:
     if args.user:
         u = user_get(session, args.user)
         q = q.where(ContextRecord.user_id == u.id)
+    if args.assignment:
+        q = q.where(ContextRecord.assignment == args.assignment)
     if args.status:
         q = q.where(ContextRecord.blob_status == BlobStatus(args.status))
     rows = session.exec(q).all()
@@ -262,6 +264,7 @@ def _cmd_record_list(session: Session, args: argparse.Namespace) -> None:
                 "ts": r.ts.isoformat(),
                 "user_id": str(r.user_id),
                 "course_id": str(r.course_id),
+                "assignment": r.assignment,
                 "model": r.model,
                 "blob_size": r.blob_size,
                 "blob_status": r.blob_status,

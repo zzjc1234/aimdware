@@ -33,6 +33,7 @@ test("buildSessionBlob handles a 1 MB user message verbatim", () => {
   const r = buildSessionBlob({
     session_id: "x",
     course: "C",
+    assignment: "hw1",
     started_at: new Date(0),
     latest_ts: new Date(0),
     turn_count: 1,
@@ -73,6 +74,7 @@ test("buildSessionBlob handles a 1 MB tools array verbatim", () => {
   const r = buildSessionBlob({
     session_id: "x",
     course: "C",
+    assignment: "hw1",
     started_at: new Date(0),
     latest_ts: new Date(0),
     turn_count: 1,
@@ -102,6 +104,7 @@ test("buildSessionBlob handles a 1 MB SSE-streamed response (kept as raw string)
   const r = buildSessionBlob({
     session_id: "x",
     course: "C",
+    assignment: "hw1",
     started_at: new Date(0),
     latest_ts: new Date(0),
     turn_count: 1,

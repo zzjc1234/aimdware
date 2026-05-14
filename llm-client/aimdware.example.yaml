@@ -16,6 +16,12 @@ student_token: REPLACE_ME
 # Course code, must match what the TT enrolled you in.
 course: REPLACE_ME
 
+# Assignment label inside that course. Free-form, but TT-decreed —
+# whatever string the TT told you to use for this hw / lab / exam.
+# Every captured conversation will land under this assignment's folder
+# on jbox, so picking the right one is what lets the TT find your work.
+assignment: REPLACE_ME
+
 # Backend URL (TT will tell you).
 backend_url: https://aimdware.example.edu
 

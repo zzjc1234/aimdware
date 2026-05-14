@@ -5,6 +5,7 @@ test("loadConfig parses a minimal config", () => {
   const yaml = `
 student_token: st_abc123
 course: ECE4721J
+assignment: hw1
 upstream:
   api_key: sk-test
 backend_url: https://aimdware.sjtu.edu
@@ -21,6 +22,7 @@ test("loadConfig applies defaults for optional fields", () => {
   const yaml = `
 student_token: st_x
 course: ECE4721J
+assignment: hw1
 upstream:
   api_key: sk-x
 backend_url: https://b.example
@@ -30,26 +32,30 @@ backend_url: https://b.example
   expect(config.upstream.base_url).toBe("https://api.openai.com");
   expect(config.port).toBe(12345);
   expect(config.local_cache_dir).toBe("~/.cache/aimdware");
-  expect(config.jbox_remote_path).toBe("aimdware/ECE4721J");
+  expect(config.jbox_remote_path).toBe("aimdware/ECE4721J/hw1");
 });
 
 test("loadConfig rejects missing required fields", () => {
   const cases: Array<[string, string]> = [
     [
       "missing student_token",
-      `course: X\nupstream:\n  api_key: k\nbackend_url: u`,
+      `course: X\nassignment: hw1\nupstream:\n  api_key: k\nbackend_url: u`,
     ],
     [
       "missing course",
-      `student_token: t\nupstream:\n  api_key: k\nbackend_url: u`,
+      `student_token: t\nassignment: hw1\nupstream:\n  api_key: k\nbackend_url: u`,
+    ],
+    [
+      "missing assignment",
+      `student_token: t\ncourse: X\nupstream:\n  api_key: k\nbackend_url: u`,
     ],
     [
       "missing upstream.api_key",
-      `student_token: t\ncourse: X\nupstream: {}\nbackend_url: u`,
+      `student_token: t\ncourse: X\nassignment: hw1\nupstream: {}\nbackend_url: u`,
     ],
     [
       "missing backend_url",
-      `student_token: t\ncourse: X\nupstream:\n  api_key: k`,
+      `student_token: t\ncourse: X\nassignment: hw1\nupstream:\n  api_key: k`,
     ],
   ];
   for (const [label, yaml] of cases) {
@@ -61,6 +67,7 @@ test("loadConfig defaults upstream.type to 'openai'", () => {
   const yaml = `
 student_token: st_x
 course: ECE4721J
+assignment: hw1
 upstream:
   api_key: sk-x
 backend_url: https://b.example
@@ -73,6 +80,7 @@ test("loadConfig parses an explicit upstream.type", () => {
   const yaml = `
 student_token: st_x
 course: ECE4721J
+assignment: hw1
 upstream:
   type: openai
   api_key: sk-x

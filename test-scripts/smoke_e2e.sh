@@ -88,6 +88,7 @@ echo "--- seeded token: ${TOKEN:0:8}… ---"
 cat >"$WORK/aimdware.yaml" <<EOF
 student_token: $TOKEN
 course: ECE4721J
+assignment: smoke
 upstream:
   base_url: http://127.0.0.1:$UPSTREAM_PORT
   api_key: sk-smoke-test-key

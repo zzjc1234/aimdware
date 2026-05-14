@@ -179,6 +179,7 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
       const blob = buildSessionBlob({
         session_id: cls.session_id,
         course: config.course,
+        assignment: config.assignment,
         started_at: cls.started_at,
         latest_ts: result.ts,
         turn_count: cls.turn_count,
@@ -204,6 +205,7 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
         session_id: cls.session_id,
         turn_count: cls.turn_count,
         course_code: config.course,
+        assignment: config.assignment,
         blob_hash: bytesToHex(blob.blob_hash),
         blob_uri: `${config.jbox_remote_path}/${cls.session_id}.json`,
         blob_size: blob.blob_size,
