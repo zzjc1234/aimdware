@@ -196,3 +196,44 @@ test("proxyChat relays an SSE stream chunk-by-chunk", async () => {
   const body = await res.text();
   expect(body).toBe(chunks.join(""));
 });
+
+test("proxyChat preserves base_url path prefix (SJTU-style /api/v1)", async () => {
+  // SJTU gateway is at https://models.sjtu.edu.cn/api/v1 — base_url has
+  // a path component. Naive `new URL(absolute, base)` would drop it.
+  const recorded: Array<{ url: string }> = [];
+  const fake = async (url: URL | string) => {
+    recorded.push({ url: typeof url === "string" ? url : url.toString() });
+    return new Response('{"ok":true}', { status: 200 });
+  };
+
+  await proxyChat(
+    new Request("http://router-local/v1/chat/completions", {
+      method: "POST",
+      body: '{"model":"x","messages":[]}',
+      headers: { "content-type": "application/json" },
+    }),
+    { base_url: "https://example.com/api/v1", api_key: "k" },
+    { fetchImpl: fake as FetchLike },
+  );
+
+  expect(recorded[0]!.url).toBe("https://example.com/api/v1/chat/completions");
+});
+
+test("proxyChat does not double-prefix /v1 when base_url already ends with /v1", async () => {
+  const recorded: Array<{ url: string }> = [];
+  const fake = async (url: URL | string) => {
+    recorded.push({ url: typeof url === "string" ? url : url.toString() });
+    return new Response("{}", { status: 200 });
+  };
+
+  await proxyChat(
+    new Request("http://router-local/v1/chat/completions", {
+      method: "POST",
+      body: "{}",
+    }),
+    { base_url: "https://api.openai.com/v1", api_key: "k" },
+    { fetchImpl: fake as FetchLike },
+  );
+
+  expect(recorded[0]!.url).toBe("https://api.openai.com/v1/chat/completions");
+});

@@ -33,10 +33,16 @@ export async function proxyChat(
   opts: ProxyChatOpts = {},
 ): Promise<Response> {
   const inboundUrl = new URL(inbound.url);
-  const target = new URL(
-    inboundUrl.pathname + inboundUrl.search,
-    upstream.base_url,
-  );
+  // We can't use `new URL(absolutePath, base)` because that drops base's
+  // path component. Concatenate explicitly, then dedupe a `/v1` if the
+  // user put it in both `base_url` and (per OpenAI convention) we got
+  // `/v1/chat/completions` inbound.
+  const base = upstream.base_url.replace(/\/+$/, "");
+  let path = inboundUrl.pathname;
+  if (base.endsWith("/v1") && path.startsWith("/v1/")) {
+    path = path.slice("/v1".length);
+  }
+  const target = new URL(base + path + inboundUrl.search);
 
   const forwardedHeaders = new Headers();
   inbound.headers.forEach((value, key) => {

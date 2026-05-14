@@ -5,3 +5,5 @@ dist/
 .DS_Store
 
 .*.bun-build
+test-functional/runs/
+test-functional/opencode.json
