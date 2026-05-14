@@ -32,9 +32,9 @@ D="$WORK/cache/records"
 for f in "$D"/*.json; do
   sid=$(basename "$f" .json | head -c 8)
   ts=$(jq -r '.latest_ts' "$f")
-  msgs=$(jq -r '.messages | length' "$f")
-  sys0=$(jq -r '.messages[0].content // ""' "$f" 2>/dev/null | head -c 40 | tr '\n' ' ')
-  usr0=$(jq -r '.messages | map(select(.role == "user")) | .[0].content // ""' "$f" 2>/dev/null | head -c 40 | tr '\n' ' ')
+  msgs=$(jq -r '.request.messages | length' "$f")
+  sys0=$(jq -r '.request.messages[0].content // ""' "$f" 2>/dev/null | head -c 40 | tr '\n' ' ')
+  usr0=$(jq -r '.request.messages | map(select(.role == "user")) | .[0].content // ""' "$f" 2>/dev/null | head -c 40 | tr '\n' ' ')
   printf '%s  msgs=%2d  sess=%s  sys="%s…" usr="%s…"\n' "$ts" "$msgs" "$sid" "$sys0" "$usr0"
 done | sort
 

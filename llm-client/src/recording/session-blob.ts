@@ -20,38 +20,31 @@ export type SessionBlobResult = {
 
 /**
  * Build the per-session blob file. Each new turn overwrites this file
- * on jbox, so it always reflects the latest known state of the session:
- *   - `messages` is the final turn's request.messages (already contains
- *     the full history because the agent re-sends everything every turn)
- *   - `latest_response` is the final turn's response
+ * on jbox, so it always reflects the latest known state of the session.
  *
- * TT reads this file and the conversation it sees is the conversation
- * as of the latest turn — no per-turn snapshots to stitch together.
+ * Schema (source of truth — anything the model saw is in `request`,
+ * anything it returned is in `response`):
+ *
+ *   {
+ *     session_id, course, started_at, latest_ts, turn_count,
+ *     upstream: { type }, upstream_status,
+ *     request:  <the parsed chat-completion body verbatim>,
+ *     response: <the parsed response body, or the raw string if not JSON
+ *               (streaming SSE comes through as a string here)>
+ *   }
+ *
+ * Consumers read `request.messages`, `request.tools`, `request.model`,
+ * `request.temperature`, etc. directly. We do NOT extract individual
+ * fields onto the blob root — that just means we'd have to extend the
+ * extractor every time the upstream protocol gains a parameter
+ * (response_format, parallel_tool_calls, reasoning_effort, …). Source
+ * of truth, single place.
  */
 export function buildSessionBlob(input: SessionBlobInput): SessionBlobResult {
   const reqText = decodeBytes(input.request_bytes);
   const respText = decodeBytes(input.response_bytes);
   const parsedReq = tryParseJSON(reqText);
   const parsedResp = tryParseJSON(respText);
-
-  let model: string | null = null;
-  let messages: unknown[] = [];
-  let tools: unknown = null;
-  let tool_choice: unknown = null;
-  if (parsedReq && typeof parsedReq === "object") {
-    const req = parsedReq as {
-      model?: unknown;
-      messages?: unknown;
-      tools?: unknown;
-      tool_choice?: unknown;
-    };
-    model = typeof req.model === "string" ? req.model : null;
-    messages = Array.isArray(req.messages) ? req.messages : [];
-    // Preserve tool definitions + tool_choice so a TT can see what
-    // capabilities the agent gave the model, not just which it used.
-    tools = req.tools ?? null;
-    tool_choice = req.tool_choice ?? null;
-  }
 
   const blob = {
     session_id: input.session_id,
@@ -61,11 +54,8 @@ export function buildSessionBlob(input: SessionBlobInput): SessionBlobResult {
     turn_count: input.turn_count,
     upstream: { type: input.upstream_type },
     upstream_status: input.upstream_status,
-    model,
-    messages,
-    tools,
-    tool_choice,
-    latest_response: parsedResp,
+    request: parsedReq,
+    response: parsedResp,
   };
 
   const blob_bytes = new TextEncoder().encode(JSON.stringify(blob, null, 2));

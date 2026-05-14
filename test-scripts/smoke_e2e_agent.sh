@@ -154,7 +154,7 @@ print(f\"  turn_count     {d['turn_count']}\")
 print(f\"  blob_size      {d['blob_size_actual']}\")
 print(f\"  verified       {d['verified']}\")
 payload = json.loads(d['payload_utf8'])
-print(f\"  blob has {len(payload['messages'])} messages in final state\")
+print(f\"  blob has {len(payload['request']['messages'])} messages in final state\")
 print(f\"  blob's turn_count field: {payload['turn_count']}\")
 "
 VERIFIED=$(echo "$RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin)["verified"])')
