@@ -17,10 +17,26 @@ SELECT substr(id,1,8) AS record,
        turn_count,
        blob_status,
        blob_size,
-       model
+       ts
 FROM context_records
 ORDER BY ts;
 SQL
+
+# Agent runs spawn many independent sessions (e.g. orchestrator + N
+# sub-agents). Cluster blobs by their first user prompt to show which
+# logical "thread" each one belongs to.
+echo
+echo "=== blob thread fingerprint (system + first user, first 80 chars) ==="
+D="$WORK/cache/records"
+[ -d "$D" ] || exit 0
+for f in "$D"/*.json; do
+  sid=$(basename "$f" .json | head -c 8)
+  ts=$(jq -r '.latest_ts' "$f")
+  msgs=$(jq -r '.messages | length' "$f")
+  sys0=$(jq -r '.messages[0].content // ""' "$f" 2>/dev/null | head -c 40 | tr '\n' ' ')
+  usr0=$(jq -r '.messages | map(select(.role == "user")) | .[0].content // ""' "$f" 2>/dev/null | head -c 40 | tr '\n' ' ')
+  printf '%s  msgs=%2d  sess=%s  sys="%s…" usr="%s…"\n' "$ts" "$msgs" "$sid" "$sys0" "$usr0"
+done | sort
 
 # If a session_id was passed in, also fetch the jbox blob.
 SID="${1:-}"

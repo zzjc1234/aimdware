@@ -36,10 +36,21 @@ export function buildSessionBlob(input: SessionBlobInput): SessionBlobResult {
 
   let model: string | null = null;
   let messages: unknown[] = [];
+  let tools: unknown = null;
+  let tool_choice: unknown = null;
   if (parsedReq && typeof parsedReq === "object") {
-    const req = parsedReq as { model?: unknown; messages?: unknown };
+    const req = parsedReq as {
+      model?: unknown;
+      messages?: unknown;
+      tools?: unknown;
+      tool_choice?: unknown;
+    };
     model = typeof req.model === "string" ? req.model : null;
     messages = Array.isArray(req.messages) ? req.messages : [];
+    // Preserve tool definitions + tool_choice so a TT can see what
+    // capabilities the agent gave the model, not just which it used.
+    tools = req.tools ?? null;
+    tool_choice = req.tool_choice ?? null;
   }
 
   const blob = {
@@ -52,6 +63,8 @@ export function buildSessionBlob(input: SessionBlobInput): SessionBlobResult {
     upstream_status: input.upstream_status,
     model,
     messages,
+    tools,
+    tool_choice,
     latest_response: parsedResp,
   };
 

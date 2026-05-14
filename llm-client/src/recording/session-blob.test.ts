@@ -126,3 +126,55 @@ test("two consecutive turns of the same session produce strictly growing blob si
   });
   expect(turn2.blob_size).toBeGreaterThan(turn1.blob_size);
 });
+
+test("tools + tool_choice in the request body are preserved on the blob", () => {
+  const reqText = JSON.stringify({
+    model: "x",
+    messages: [{ role: "user", content: "list files" }],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "fs_read",
+          parameters: {
+            type: "object",
+            properties: { path: { type: "string" } },
+          },
+        },
+      },
+    ],
+    tool_choice: "auto",
+  });
+  const r = buildSessionBlob({
+    session_id: "x",
+    course: "C",
+    started_at: new Date(0),
+    latest_ts: new Date(0),
+    turn_count: 1,
+    upstream_type: "openai",
+    upstream_status: 200,
+    request_bytes: new TextEncoder().encode(reqText),
+    response_bytes: new TextEncoder().encode("{}"),
+  });
+  const obj = JSON.parse(new TextDecoder().decode(r.blob_bytes));
+  expect(obj.tools).toHaveLength(1);
+  expect(obj.tools[0].function.name).toBe("fs_read");
+  expect(obj.tool_choice).toBe("auto");
+});
+
+test("missing tools / tool_choice → null on the blob (no surprises)", () => {
+  const r = buildSessionBlob({
+    session_id: "x",
+    course: "C",
+    started_at: new Date(0),
+    latest_ts: new Date(0),
+    turn_count: 1,
+    upstream_type: "openai",
+    upstream_status: 200,
+    request_bytes: new TextEncoder().encode('{"model":"x","messages":[]}'),
+    response_bytes: new TextEncoder().encode("{}"),
+  });
+  const obj = JSON.parse(new TextDecoder().decode(r.blob_bytes));
+  expect(obj.tools).toBeNull();
+  expect(obj.tool_choice).toBeNull();
+});
