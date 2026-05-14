@@ -151,3 +151,35 @@ test("sync stage routes WebDAV errors through the result kind", async () => {
   const r401 = await buildSyncStage(cacheDir, auth401)(body("r2", "S-err", 1));
   expect(r401.kind).toBe("terminal");
 });
+
+test("sync stage uploads a 2 MB blob without truncation or corruption", async () => {
+  // Realistic agent-platform scenario: 1 MB tools schema + 1 MB user
+  // context produces a multi-megabyte cache file. Sync must round-trip
+  // it intact to the (fake here) WebDAV.
+  const { cacheDir } = fresh();
+  const { put, uploads } = recordingPut();
+  const filePath = join(cacheDir, "records", "S-big.json");
+
+  // Build ~2 MB of deterministic content.
+  const block = "abcdefghijklmnopqrstuvwxyz".repeat(40);
+  const big = block.repeat(50_000); // ~52 MB → trim to 2 MB
+  const blob = new TextEncoder().encode(big.slice(0, 2_000_000));
+  await writeAtomic(filePath, blob);
+
+  const t0 = performance.now();
+  const r = await buildSyncStage(cacheDir, put)(body("r1", "S-big", 1));
+  const dt = performance.now() - t0;
+
+  expect(r).toEqual({ kind: "advance" });
+  expect(uploads).toHaveLength(1);
+  expect(uploads[0]!.bytes.byteLength).toBe(2_000_000);
+
+  // Verify byte-identity: a single differing byte would fail audit.
+  const sent = uploads[0]!.bytes;
+  expect(sent[0]).toBe(blob[0]);
+  expect(sent[1_999_999]).toBe(blob[1_999_999]);
+  expect(Buffer.from(sent).equals(Buffer.from(blob))).toBe(true);
+
+  // <500ms even on a 2 MB read + memcpy + PUT-callback.
+  expect(dt).toBeLessThan(500);
+});
