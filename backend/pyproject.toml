@@ -21,7 +21,26 @@ dev = [
     "pytest-asyncio>=0.24",
     "httpx>=0.27",
     "anyio>=4.6",
+    "ruff>=0.14.5",
+    "prek>=0.2",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "W",   # pycodestyle warnings
+    "B",   # bugbear
+    "UP",  # pyupgrade
+    "SIM", # simplify
+]
+ignore = ["E501"]  # line-too-long: handled by formatter
 
 [build-system]
 requires = ["hatchling"]

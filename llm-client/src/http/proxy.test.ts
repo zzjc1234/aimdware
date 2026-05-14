@@ -58,7 +58,10 @@ afterEach(async () => {
 
 test("proxyChat forwards body and rewrites Authorization to upstream's api_key", async () => {
   const { baseUrl } = await startFakeUpstream(
-    () => new Response('{"id":"x"}', { headers: { "content-type": "application/json" } }),
+    () =>
+      new Response('{"id":"x"}', {
+        headers: { "content-type": "application/json" },
+      }),
   );
 
   const inbound = new Request("http://localhost/v1/chat/completions", {
@@ -67,7 +70,10 @@ test("proxyChat forwards body and rewrites Authorization to upstream's api_key",
       "content-type": "application/json",
       authorization: "Bearer router-side-junk",
     },
-    body: JSON.stringify({ model: "gpt-4o", messages: [{ role: "user", content: "hi" }] }),
+    body: JSON.stringify({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "hi" }],
+    }),
   });
 
   await proxyChat(inbound, { base_url: baseUrl, api_key: "sk-upstream" });
@@ -83,7 +89,11 @@ test("proxyChat forwards body and rewrites Authorization to upstream's api_key",
 
 test("proxyChat returns upstream status and body verbatim for non-stream", async () => {
   const { baseUrl } = await startFakeUpstream(
-    () => new Response('{"echo":"ok"}', { status: 201, headers: { "content-type": "application/json" } }),
+    () =>
+      new Response('{"echo":"ok"}', {
+        status: 201,
+        headers: { "content-type": "application/json" },
+      }),
   );
 
   const res = await proxyChat(
@@ -100,7 +110,8 @@ test("proxyChat returns upstream status and body verbatim for non-stream", async
 });
 
 test("proxyChat passes proxy from HTTPS_PROXY env to fetch", async () => {
-  const calls: Array<{ url: string; init: RequestInit & { proxy?: string } }> = [];
+  const calls: Array<{ url: string; init: RequestInit & { proxy?: string } }> =
+    [];
   const mockFetch: FetchLike = async (input, init) => {
     calls.push({
       url: typeof input === "string" ? input : (input as URL).toString(),

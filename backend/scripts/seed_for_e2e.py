@@ -11,6 +11,7 @@ Usage:
     AIMDWARE_DATABASE_URL=sqlite:///./aimdware.db \
         uv run python scripts/seed_for_e2e.py
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -74,23 +75,13 @@ def main() -> int:
             )
         ).first()
         if enrol is None:
-            s.add(
-                Enrollment(
-                    user_id=user.id, course_id=course.id, role=Role.student
-                )
-            )
+            s.add(Enrollment(user_id=user.id, course_id=course.id, role=Role.student))
             s.commit()
 
         digest = hashlib.sha256(plaintext.encode()).digest()
-        existing = s.exec(
-            select(StudentToken).where(StudentToken.token_hash == digest)
-        ).first()
+        existing = s.exec(select(StudentToken).where(StudentToken.token_hash == digest)).first()
         if existing is None:
-            s.add(
-                StudentToken(
-                    user_id=user.id, token_hash=digest, prefix=plaintext[:8]
-                )
-            )
+            s.add(StudentToken(user_id=user.id, token_hash=digest, prefix=plaintext[:8]))
             s.commit()
 
     print(plaintext, end="")

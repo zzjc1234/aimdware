@@ -1,4 +1,5 @@
 """WebDAV-via-Tbox blob reader."""
+
 from __future__ import annotations
 
 from typing import Protocol
@@ -46,9 +47,5 @@ def default_reader() -> JboxReader:
     """Build the default reader from settings."""
     from aimdware_backend.settings import settings
 
-    auth = (
-        (settings.tbox_user, settings.tbox_pass)
-        if settings.tbox_user
-        else None
-    )
+    auth = (settings.tbox_user, settings.tbox_pass) if settings.tbox_user else None
     return TboxWebDAVReader(settings.tbox_url, auth=auth)

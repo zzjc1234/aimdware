@@ -26,7 +26,8 @@ function fresh() {
   return { cacheDir };
 }
 afterEach(() => {
-  for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  for (const d of tmpDirs.splice(0))
+    rmSync(d, { recursive: true, force: true });
 });
 
 function recordingPut(): {
@@ -40,7 +41,11 @@ function recordingPut(): {
   return { put, uploads };
 }
 
-function body(record_id: string, session_id: string, turn_count: number): IngestBody {
+function body(
+  record_id: string,
+  session_id: string,
+  turn_count: number,
+): IngestBody {
   return {
     record_id,
     session_id,

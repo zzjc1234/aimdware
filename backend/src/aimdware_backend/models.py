@@ -1,26 +1,26 @@
 """SQLModel schemas for the aimdware backend."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Optional
+from datetime import UTC, datetime
+from enum import StrEnum
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, Column, Index, JSON, LargeBinary, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Column, Index, LargeBinary, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
 def utcnow() -> datetime:
     """Return the current UTC time (timezone-aware)."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
-class Role(str, Enum):
+class Role(StrEnum):
     student = "student"
     admin = "admin"
 
 
-class BlobStatus(str, Enum):
+class BlobStatus(StrEnum):
     """Lifecycle of the per-record blob on jbox.
 
     Note on multi-turn sessions: the blob file is keyed by `session_id`
@@ -78,7 +78,7 @@ class StudentToken(SQLModel, table=True):
     token_hash: bytes = Field(sa_column=Column(LargeBinary))
     prefix: str
     created_at: datetime = Field(default_factory=utcnow)
-    revoked_at: Optional[datetime] = None
+    revoked_at: datetime | None = None
 
     # Partial unique index — at most one active token per user — is added
     # in the Alembic migration. SQLModel can't express partial uniqueness
@@ -92,9 +92,7 @@ class ContextRecord(SQLModel, table=True):
     # routers writing concurrent records for the same session can never
     # silently collide on a tiebreaker; the DB will reject the duplicate.
     __table_args__ = (
-        UniqueConstraint(
-            "session_id", "turn_count", name="ux_context_records_session_turn"
-        ),
+        UniqueConstraint("session_id", "turn_count", name="ux_context_records_session_turn"),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -116,4 +114,4 @@ class ContextRecord(SQLModel, table=True):
     blob_hash: bytes = Field(sa_column=Column(LargeBinary))
     blob_size: int = Field(sa_column=Column(BigInteger))
     blob_status: BlobStatus = Field(default=BlobStatus.pending, index=True)
-    blob_verified_at: Optional[datetime] = None
+    blob_verified_at: datetime | None = None

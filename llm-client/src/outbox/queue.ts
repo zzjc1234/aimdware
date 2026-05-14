@@ -81,9 +81,9 @@ export class IngestQueue {
    * ALTER TABLE ADD COLUMN throws on duplicate, so we probe first via PRAGMA.
    */
   private migrateSchema(): void {
-    const cols = this.db
-      .prepare("PRAGMA table_info(outbox)")
-      .all() as Array<{ name: string }>;
+    const cols = this.db.prepare("PRAGMA table_info(outbox)").all() as Array<{
+      name: string;
+    }>;
     const has = (n: string) => cols.some((c) => c.name === n);
     if (!has("session_id")) {
       this.db.run("ALTER TABLE outbox ADD COLUMN session_id TEXT");
@@ -120,7 +120,10 @@ export class IngestQueue {
          ORDER BY next_attempt_at ASC, created_at ASC
          LIMIT ?`,
       )
-      .all(...ACTIVE_STATES, now, limit) as Array<{ body_json: string; state: RecordState }>;
+      .all(...ACTIVE_STATES, now, limit) as Array<{
+      body_json: string;
+      state: RecordState;
+    }>;
     return rows.map((r) => ({
       body: JSON.parse(r.body_json) as IngestBody,
       state: r.state,
@@ -160,13 +163,10 @@ export class IngestQueue {
          )
          RETURNING body_json, state`,
       )
-      .all(
-        now,
-        ...ACTIVE_STATES,
-        now,
-        now - staleMs,
-        limit,
-      ) as Array<{ body_json: string; state: RecordState }>;
+      .all(now, ...ACTIVE_STATES, now, now - staleMs, limit) as Array<{
+      body_json: string;
+      state: RecordState;
+    }>;
     return rows.map((r) => ({
       body: JSON.parse(r.body_json) as IngestBody,
       state: r.state,
@@ -176,7 +176,11 @@ export class IngestQueue {
   /**
    * Advance to the next state on success. Resets attempts + clears error.
    */
-  advance(record_id: string, newState: RecordState, nextAttemptAt: number): void {
+  advance(
+    record_id: string,
+    newState: RecordState,
+    nextAttemptAt: number,
+  ): void {
     this.db
       .prepare(
         `UPDATE outbox
@@ -263,9 +267,9 @@ export class IngestQueue {
          LIMIT ?`,
       )
       .all(olderThanCreatedAt, limit) as Array<{
-        session_id: string;
-        record_ids: string;
-      }>;
+      session_id: string;
+      record_ids: string;
+    }>;
     return rows.map((r) => ({
       session_id: r.session_id,
       record_ids: r.record_ids.split(SEP),

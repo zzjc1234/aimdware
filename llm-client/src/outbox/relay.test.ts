@@ -32,7 +32,8 @@ function body(id: string): IngestBody {
   };
 }
 afterEach(() => {
-  for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  for (const d of tmpDirs.splice(0))
+    rmSync(d, { recursive: true, force: true });
 });
 
 const advance: StageHandler = async () => ({ kind: "advance" });
@@ -107,7 +108,9 @@ test("terminal -> markTerminal, no retry", async () => {
 test("handler-throws is treated as retryable", async () => {
   const q = freshQueue();
   q.enqueue(body("r1"), 0);
-  const boom: StageHandler = async () => { throw new Error("kaboom"); };
+  const boom: StageHandler = async () => {
+    throw new Error("kaboom");
+  };
   await runOnce({ queue: q, stages: stub3(boom), now: () => 0 });
   const s = q.statusOf("r1")!;
   expect(s.state).toBe("captured");
@@ -119,25 +122,38 @@ test("handler-throws is treated as retryable", async () => {
 test("nothing ready -> processed=0", async () => {
   const q = freshQueue();
   q.enqueue(body("r1"), 5000);
-  const summary = await runOnce({ queue: q, stages: stub3(advance), now: () => 100 });
+  const summary = await runOnce({
+    queue: q,
+    stages: stub3(advance),
+    now: () => 100,
+  });
   expect(summary.processed).toBe(0);
   q.close();
 });
 
 test("dispatches the right handler per record state", async () => {
   const q = freshQueue();
-  q.enqueue(body("a"), 0);                // captured -> ingest
+  q.enqueue(body("a"), 0); // captured -> ingest
   q.enqueue(body("b"), 0);
-  q.advance("b", "ingested", 0);          // ingested -> sync
+  q.advance("b", "ingested", 0); // ingested -> sync
   q.enqueue(body("c"), 0);
   q.advance("c", "ingested", 0);
-  q.advance("c", "synced", 0);            // synced -> confirm
+  q.advance("c", "synced", 0); // synced -> confirm
 
   const called: string[] = [];
   const stages: Stages = {
-    ingest:  async (b) => { called.push(`ingest:${b.record_id}`);  return { kind: "advance" }; },
-    sync:    async (b) => { called.push(`sync:${b.record_id}`);    return { kind: "advance" }; },
-    confirm: async (b) => { called.push(`confirm:${b.record_id}`); return { kind: "advance" }; },
+    ingest: async (b) => {
+      called.push(`ingest:${b.record_id}`);
+      return { kind: "advance" };
+    },
+    sync: async (b) => {
+      called.push(`sync:${b.record_id}`);
+      return { kind: "advance" };
+    },
+    confirm: async (b) => {
+      called.push(`confirm:${b.record_id}`);
+      return { kind: "advance" };
+    },
   };
   await runOnce({ queue: q, stages, now: () => 100 });
 
@@ -167,8 +183,8 @@ test("processes the batch in parallel up to concurrency", async () => {
     8,
   );
 
-  expect(peak).toBeGreaterThanOrEqual(2);   // actually parallel (not serial)
-  expect(peak).toBeLessThanOrEqual(4);      // bounded by concurrency
+  expect(peak).toBeGreaterThanOrEqual(2); // actually parallel (not serial)
+  expect(peak).toBeLessThanOrEqual(4); // bounded by concurrency
   for (let i = 0; i < 8; i++) {
     expect(q.statusOf(`r${i}`)?.state).toBe("ingested");
   }
@@ -194,9 +210,18 @@ test("multi-turn session: independent records sharing one session_id both advanc
 
   const seen: Record<string, string[]> = { ingest: [], sync: [], confirm: [] };
   const stages: Stages = {
-    ingest: async (b) => { seen.ingest!.push(b.record_id);  return { kind: "advance" }; },
-    sync:   async (b) => { seen.sync!.push(b.record_id);    return { kind: "advance" }; },
-    confirm:async (b) => { seen.confirm!.push(b.record_id); return { kind: "advance" }; },
+    ingest: async (b) => {
+      seen.ingest!.push(b.record_id);
+      return { kind: "advance" };
+    },
+    sync: async (b) => {
+      seen.sync!.push(b.record_id);
+      return { kind: "advance" };
+    },
+    confirm: async (b) => {
+      seen.confirm!.push(b.record_id);
+      return { kind: "advance" };
+    },
   };
   await runOnce({ queue: q, stages, now: () => 100 });
 

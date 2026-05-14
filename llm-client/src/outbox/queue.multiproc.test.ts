@@ -8,7 +8,8 @@ import type { IngestBody } from "./ingest-client";
 const tmpDirs: string[] = [];
 
 afterEach(() => {
-  for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  for (const d of tmpDirs.splice(0))
+    rmSync(d, { recursive: true, force: true });
 });
 
 function body(id: string): IngestBody {
@@ -25,7 +26,11 @@ function body(id: string): IngestBody {
   };
 }
 
-async function spawnClaimer(scriptPath: string, dbPath: string, limit: number): Promise<string[]> {
+async function spawnClaimer(
+  scriptPath: string,
+  dbPath: string,
+  limit: number,
+): Promise<string[]> {
   const proc = Bun.spawn(["bun", scriptPath, dbPath, String(limit)], {
     stdout: "pipe",
     stderr: "pipe",
@@ -69,7 +74,10 @@ q.close();
 
   // Union covers all 200, intersection is empty — atomic claim.
   const both = [...idsA, ...idsB].sort();
-  const expected = Array.from({ length: 200 }, (_, i) => `r${i.toString().padStart(3, "0")}`);
+  const expected = Array.from(
+    { length: 200 },
+    (_, i) => `r${i.toString().padStart(3, "0")}`,
+  );
   expect(both).toEqual(expected);
 
   const setB = new Set(idsB);
@@ -111,6 +119,8 @@ q.close();
 
   const all = results.flat();
   // Every record claimed exactly once.
-  expect(all.sort()).toEqual(Array.from({ length: 30 }, (_, i) => `x${i}`).sort());
+  expect(all.sort()).toEqual(
+    Array.from({ length: 30 }, (_, i) => `x${i}`).sort(),
+  );
   expect(new Set(all).size).toBe(30);
 });

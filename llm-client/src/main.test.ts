@@ -79,11 +79,17 @@ backend_url: http://127.0.0.1:1
   try {
     await waitForPort(routerPort);
 
-    const res = await fetch(`http://127.0.0.1:${routerPort}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: "gpt-4o", messages: [{ role: "user", content: "hi" }] }),
-    });
+    const res = await fetch(
+      `http://127.0.0.1:${routerPort}/v1/chat/completions`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-4o",
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      },
+    );
     expect(res.status).toBe(200);
     expect(await res.text()).toBe('{"id":"upstream-ok"}');
   } finally {

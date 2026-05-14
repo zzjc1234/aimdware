@@ -35,7 +35,9 @@ test("real Tbox: PUT (with auto-MKCOL) then GET roundtrip", async () => {
 
   const subdir = `aimdware-it-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const path = `/${subdir}/sample.json`;
-  const payload = new TextEncoder().encode(`{"hello":"tbox","ts":${Date.now()}}`);
+  const payload = new TextEncoder().encode(
+    `{"hello":"tbox","ts":${Date.now()}}`,
+  );
 
   const result = await syncBlob(put, path, payload);
   expect(result).toEqual({ kind: "synced" });
@@ -64,12 +66,20 @@ test("real Tbox: second PUT to the same parent reuses cached MKCOL (no extra MKC
   const pathA = `/${subdir}/a.json`;
   const pathB = `/${subdir}/b.json`;
 
-  expect(await syncBlob(put, pathA, new TextEncoder().encode("A"))).toEqual({ kind: "synced" });
-  expect(await syncBlob(put, pathB, new TextEncoder().encode("B"))).toEqual({ kind: "synced" });
+  expect(await syncBlob(put, pathA, new TextEncoder().encode("A"))).toEqual({
+    kind: "synced",
+  });
+  expect(await syncBlob(put, pathB, new TextEncoder().encode("B"))).toEqual({
+    kind: "synced",
+  });
 
   const client = createClient(TBOX_URL, auth);
-  expect(Buffer.from((await client.getFileContents(pathA)) as Buffer).toString()).toBe("A");
-  expect(Buffer.from((await client.getFileContents(pathB)) as Buffer).toString()).toBe("B");
+  expect(
+    Buffer.from((await client.getFileContents(pathA)) as Buffer).toString(),
+  ).toBe("A");
+  expect(
+    Buffer.from((await client.getFileContents(pathB)) as Buffer).toString(),
+  ).toBe("B");
 
   try {
     await client.deleteFile(`/${subdir}`);
@@ -83,7 +93,10 @@ test("real Tbox: wrong password yields a fatal (4xx) sync result", async () => {
     console.log(`[skip] Tbox not reachable at ${TBOX_URL}`);
     return;
   }
-  const put = makeWebDAVPut(TBOX_URL, { username: "admin", password: "definitely-wrong" });
+  const put = makeWebDAVPut(TBOX_URL, {
+    username: "admin",
+    password: "definitely-wrong",
+  });
   const path = `/aimdware-it-${Date.now()}/x.json`;
   const r = await syncBlob(put, path, new TextEncoder().encode("x"));
   expect(r.kind).toBe("fatal");

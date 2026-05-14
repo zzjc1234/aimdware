@@ -139,14 +139,22 @@ test("deeply nested key reorder (tool_calls etc.) still matches", () => {
       role: "assistant",
       content: null,
       tool_calls: [
-        { id: "1", type: "function", function: { name: "ls", arguments: "{}" } },
+        {
+          id: "1",
+          type: "function",
+          function: { name: "ls", arguments: "{}" },
+        },
       ],
     } as Message,
   ]);
   const second = tr.classify([
     {
       tool_calls: [
-        { function: { arguments: "{}", name: "ls" }, type: "function", id: "1" },
+        {
+          function: { arguments: "{}", name: "ls" },
+          type: "function",
+          id: "1",
+        },
       ],
       content: null,
       role: "assistant",

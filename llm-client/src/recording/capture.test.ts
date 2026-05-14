@@ -26,14 +26,18 @@ function makeStreamingResponse(chunks: string[], opts: ResponseInit = {}) {
 }
 
 test("captureChat: non-streaming — clientResponse byte-exact, captured request + response bytes returned", async () => {
-  const requestText = '{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}';
+  const requestText =
+    '{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}';
   const responseText = '{"id":"x","choices":[{"message":{"content":"hello"}}]}';
 
   const upstreamRes = new Response(responseText, {
     status: 200,
     headers: { "content-type": "application/json" },
   });
-  const { clientResponse, captureP } = captureChat(enc(requestText), upstreamRes);
+  const { clientResponse, captureP } = captureChat(
+    enc(requestText),
+    upstreamRes,
+  );
 
   expect(await clientResponse.text()).toBe(responseText);
 
@@ -41,7 +45,9 @@ test("captureChat: non-streaming — clientResponse byte-exact, captured request
   expect(r.upstream_status).toBe(200);
   expect(dec(r.request_bytes)).toBe(requestText);
   expect(dec(r.response_bytes)).toBe(responseText);
-  expect(r.record_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  expect(r.record_id).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+  );
 });
 
 test("captureChat: streaming — clientResponse byte-for-byte + response_bytes is the joined raw SSE", async () => {

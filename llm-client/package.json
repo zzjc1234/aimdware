@@ -7,6 +7,9 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
+    "format": "bun --bun x oxfmt src/",
+    "format:check": "bun --bun x oxfmt --check src/",
+    "lint": "bun --bun x oxlint src/",
     "dev": "bun run src/main.ts",
     "build": "bun build --compile --minify --sourcemap src/main.ts --outfile dist/aimdware-router",
     "build:macos-arm64": "bun build --compile --minify --target=bun-darwin-arm64 src/main.ts --outfile dist/aimdware-router-macos-arm64",
@@ -23,6 +26,8 @@
   },
   "devDependencies": {
     "@types/bun": "^1.1.10",
+    "oxfmt": "^0.49.0",
+    "oxlint": "^1.41.0",
     "typescript": "^5.6.3"
   }
 }

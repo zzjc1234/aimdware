@@ -20,7 +20,10 @@ export async function syncBlob(
     await put(remotePath, data);
     return { kind: "synced" };
   } catch (e) {
-    const err = e as Error & { status?: number; response?: { status?: number } };
+    const err = e as Error & {
+      status?: number;
+      response?: { status?: number };
+    };
     const status = err.status ?? err.response?.status;
     if (status === undefined) {
       // Network / DNS / connection refused / abort.
@@ -43,7 +46,10 @@ export type WebDAVAuth = { username: string; password: string };
  * Tbox returns 409 on PUT into a missing parent, so without this every
  * sync would fail until something else created the course folder.
  */
-export function makeWebDAVPut(tboxUrl: string, auth?: WebDAVAuth): WebDAVPutLike {
+export function makeWebDAVPut(
+  tboxUrl: string,
+  auth?: WebDAVAuth,
+): WebDAVPutLike {
   const client: WebDAVClient = createClient(
     tboxUrl,
     auth ? { username: auth.username, password: auth.password } : undefined,

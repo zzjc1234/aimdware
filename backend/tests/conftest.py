@@ -1,10 +1,11 @@
 """Shared pytest fixtures."""
+
 from __future__ import annotations
 
 import pytest
-from sqlmodel import Session, SQLModel, create_engine
 from sqlalchemy import Engine, text
 from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine
 
 # Importing models registers them with SQLModel.metadata so create_all
 # sees every table even if a test only uses one of them.

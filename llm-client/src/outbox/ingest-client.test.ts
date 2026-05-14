@@ -1,6 +1,10 @@
 import { test, expect, afterEach } from "bun:test";
 import type { Server } from "bun";
-import { postContext, type IngestBody, type PostContextResult } from "./ingest-client";
+import {
+  postContext,
+  type IngestBody,
+  type PostContextResult,
+} from "./ingest-client";
 
 let fakeBackend: Server<unknown> | undefined;
 let lastReq: { body: string; auth: string | null; url: string } | undefined;
@@ -108,11 +112,7 @@ test("503 / 500 / 429 -> retryable", async () => {
 
 test("network error -> retryable", async () => {
   // unreachable port
-  const r = await postContext(
-    "http://127.0.0.1:1",
-    "st_x",
-    sampleBody(),
-  );
+  const r = await postContext("http://127.0.0.1:1", "st_x", sampleBody());
   expect(r.kind).toBe("retryable");
 });
 

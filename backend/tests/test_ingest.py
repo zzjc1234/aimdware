@@ -1,8 +1,9 @@
 """TDD: ingest endpoints."""
+
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -40,9 +41,7 @@ def enrolled_student(session: Session) -> tuple[str, User, Course]:
     session.commit()
     session.add(Enrollment(user_id=user.id, course_id=course.id, role=Role.student))
     plaintext = "st_ENROLLED_STUDENT_TOKEN"
-    session.add(
-        StudentToken(user_id=user.id, token_hash=_hash(plaintext), prefix=plaintext[:8])
-    )
+    session.add(StudentToken(user_id=user.id, token_hash=_hash(plaintext), prefix=plaintext[:8]))
     session.commit()
     return plaintext, user, course
 
@@ -59,7 +58,7 @@ def _body(course_code: str = "ECE4721J", **overrides) -> dict:
         "model": "gpt-4o-mini",
         "prompt_tokens": 10,
         "completion_tokens": 20,
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "router_version": "0.0.0",
         "client_meta": {"agent": "cline"},
     }

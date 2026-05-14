@@ -3,7 +3,12 @@ import type { IngestBody } from "./ingest-client";
 import { StoppableSleep } from "../util";
 
 export const DEFAULT_BACKOFF: number[] = [
-  1_000, 5_000, 30_000, 5 * 60_000, 30 * 60_000, 60 * 60_000,
+  1_000,
+  5_000,
+  30_000,
+  5 * 60_000,
+  30 * 60_000,
+  60 * 60_000,
 ];
 
 export function nextBackoff(
@@ -26,9 +31,9 @@ export type StageResult =
 export type StageHandler = (body: IngestBody) => Promise<StageResult>;
 
 export type Stages = {
-  ingest: StageHandler;   // called on state=captured
-  sync: StageHandler;     // called on state=ingested
-  confirm: StageHandler;  // called on state=synced
+  ingest: StageHandler; // called on state=captured
+  sync: StageHandler; // called on state=ingested
+  confirm: StageHandler; // called on state=synced
 };
 
 export type WorkerOpts = {
@@ -46,21 +51,32 @@ export type RunSummary = {
   terminal: number;
 };
 
-function stageFor(state: RecordState, stages: Stages): StageHandler | undefined {
+function stageFor(
+  state: RecordState,
+  stages: Stages,
+): StageHandler | undefined {
   switch (state) {
-    case "captured": return stages.ingest;
-    case "ingested": return stages.sync;
-    case "synced":   return stages.confirm;
-    default:         return undefined;
+    case "captured":
+      return stages.ingest;
+    case "ingested":
+      return stages.sync;
+    case "synced":
+      return stages.confirm;
+    default:
+      return undefined;
   }
 }
 
 function nextStateAfter(state: RecordState): RecordState {
   switch (state) {
-    case "captured": return "ingested";
-    case "ingested": return "synced";
-    case "synced":   return "done";
-    default:         return state;
+    case "captured":
+      return "ingested";
+    case "ingested":
+      return "synced";
+    case "synced":
+      return "done";
+    default:
+      return state;
   }
 }
 
@@ -83,25 +99,38 @@ export async function runOnce(
 
   // Bound concurrency. Records inside the batch run in parallel up to `concurrency`.
   let cursor = 0;
-  const workers = Array.from({ length: Math.min(concurrency, ready.length) }, async () => {
-    while (true) {
-      const i = cursor++;
-      if (i >= ready.length) return;
-      const slot = ready[i]!;
-      const handler = stageFor(slot.state, opts.stages);
-      if (!handler) continue;
-      let result: StageResult;
-      try {
-        result = await handler(slot.body);
-      } catch (e) {
-        result = { kind: "retry", reason: (e as Error).message ?? "handler threw" };
+  const workers = Array.from(
+    { length: Math.min(concurrency, ready.length) },
+    async () => {
+      while (true) {
+        const i = cursor++;
+        if (i >= ready.length) return;
+        const slot = ready[i]!;
+        const handler = stageFor(slot.state, opts.stages);
+        if (!handler) continue;
+        let result: StageResult;
+        try {
+          result = await handler(slot.body);
+        } catch (e) {
+          result = {
+            kind: "retry",
+            reason: (e as Error).message ?? "handler threw",
+          };
+        }
+        applyResult(
+          opts.queue,
+          slot.body.record_id,
+          slot.state,
+          result,
+          now,
+          backoff,
+        );
+        if (result.kind === "advance") summary.advance += 1;
+        else if (result.kind === "retry") summary.retry += 1;
+        else summary.terminal += 1;
       }
-      applyResult(opts.queue, slot.body.record_id, slot.state, result, now, backoff);
-      if (result.kind === "advance") summary.advance += 1;
-      else if (result.kind === "retry") summary.retry += 1;
-      else summary.terminal += 1;
-    }
-  });
+    },
+  );
   await Promise.all(workers);
 
   return summary;
@@ -122,7 +151,11 @@ function applyResult(
     }
     case "retry": {
       const attempts = queue.statusOf(recordId)?.attempts ?? 0;
-      queue.markRetry(recordId, result.reason, now + nextBackoff(attempts, backoff));
+      queue.markRetry(
+        recordId,
+        result.reason,
+        now + nextBackoff(attempts, backoff),
+      );
       break;
     }
     case "terminal": {

@@ -1,4 +1,5 @@
 """TDD: /admin/context/{id}/payload."""
+
 from __future__ import annotations
 
 import hashlib
@@ -95,9 +96,7 @@ def test_wrong_secret_is_401(engine: Engine, session: Session) -> None:
     payload = b'{"x":1}'
     rec = _seed_record(session, payload)
     client = _make_client(engine, _StaticReader(payload))
-    r = client.get(
-        f"/admin/context/{rec.id}/payload", headers=_auth("wrong-secret")
-    )
+    r = client.get(f"/admin/context/{rec.id}/payload", headers=_auth("wrong-secret"))
     assert r.status_code == 401
 
 
@@ -115,9 +114,7 @@ def test_admin_disabled_when_secret_unset(
 # --- happy path / verify ---
 
 
-def test_payload_returns_verified_true_when_hash_matches(
-    engine: Engine, session: Session
-) -> None:
+def test_payload_returns_verified_true_when_hash_matches(engine: Engine, session: Session) -> None:
     payload = b'{"request_text": "...", "response_text": "...", "ts": "..."}'
     rec = _seed_record(session, payload)
     reader = _StaticReader(payload)
@@ -152,35 +149,27 @@ def test_payload_returns_verified_false_when_hash_mismatches(
     assert body["payload_utf8"] == tampered.decode("utf-8")
 
 
-def test_payload_returns_404_when_record_unknown(
-    engine: Engine, session: Session
-) -> None:
+def test_payload_returns_404_when_record_unknown(engine: Engine, session: Session) -> None:
     client = _make_client(engine, _StaticReader(b"x"))
     r = client.get(f"/admin/context/{uuid4()}/payload", headers=_auth())
     assert r.status_code == 404
 
 
-def test_payload_returns_404_when_jbox_missing(
-    engine: Engine, session: Session
-) -> None:
+def test_payload_returns_404_when_jbox_missing(engine: Engine, session: Session) -> None:
     rec = _seed_record(session, b"x")
     client = _make_client(engine, _StaticReader(None))  # signals NotFound
     r = client.get(f"/admin/context/{rec.id}/payload", headers=_auth())
     assert r.status_code == 404
 
 
-def test_payload_returns_502_when_jbox_errors(
-    engine: Engine, session: Session
-) -> None:
+def test_payload_returns_502_when_jbox_errors(engine: Engine, session: Session) -> None:
     rec = _seed_record(session, b"x")
     client = _make_client(engine, _ErrorReader())
     r = client.get(f"/admin/context/{rec.id}/payload", headers=_auth())
     assert r.status_code == 502
 
 
-def test_payload_endpoint_does_not_mutate_status(
-    engine: Engine, session: Session
-) -> None:
+def test_payload_endpoint_does_not_mutate_status(engine: Engine, session: Session) -> None:
     """Reading the payload is non-destructive — no DB writes."""
     payload = b'{"x":1}'
     rec = _seed_record(session, payload)
@@ -197,9 +186,7 @@ def test_payload_endpoint_does_not_mutate_status(
 # ---------- session-level payload endpoint ----------
 
 
-def _seed_session(
-    session: Session, *, turns: list[bytes]
-) -> tuple[list[ContextRecord], bytes]:
+def _seed_session(session: Session, *, turns: list[bytes]) -> tuple[list[ContextRecord], bytes]:
     """Seed a session with `len(turns)` records. The session's "current blob"
     on jbox is the last entry of `turns` — that's what _make_client's reader
     should return. Each record's stored blob_hash is the sha256 of its
@@ -249,17 +236,13 @@ def test_session_payload_verifies_against_latest_turn_hash(
     assert body["payload_utf8"] == current_on_jbox.decode()
 
 
-def test_session_payload_404_when_session_unknown(
-    engine: Engine, session: Session
-) -> None:
+def test_session_payload_404_when_session_unknown(engine: Engine, session: Session) -> None:
     client = _make_client(engine, _StaticReader(b"x"))
     r = client.get(f"/admin/session/{uuid4()}/payload", headers=_auth())
     assert r.status_code == 404
 
 
-def test_context_payload_marks_non_latest_turn(
-    engine: Engine, session: Session
-) -> None:
+def test_context_payload_marks_non_latest_turn(engine: Engine, session: Session) -> None:
     """Pulling an OLD turn's record shows is_latest_turn=False, and
     verified=False because the on-jbox blob has moved on to a later turn."""
     turns = [b'{"turn":1}', b'{"turn":2}']

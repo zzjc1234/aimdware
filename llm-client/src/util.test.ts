@@ -11,7 +11,8 @@ function freshDir(): string {
   return d;
 }
 afterEach(() => {
-  for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  for (const d of tmpDirs.splice(0))
+    rmSync(d, { recursive: true, force: true });
 });
 
 test("writeAtomic writes the full content to the target path", async () => {

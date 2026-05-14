@@ -5,8 +5,10 @@ Skipped automatically when no Tbox is reachable. Override via env vars:
     AIMDWARE_TBOX_USER (default admin)
     AIMDWARE_TBOX_PASS (default admin)
 """
+
 from __future__ import annotations
 
+import contextlib
 import os
 import time
 from collections.abc import Iterator
@@ -29,9 +31,7 @@ def _reachable() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not _reachable(), reason=f"Tbox not reachable at {TBOX_URL}"
-)
+pytestmark = pytest.mark.skipif(not _reachable(), reason=f"Tbox not reachable at {TBOX_URL}")
 
 
 @pytest.fixture()
@@ -49,10 +49,8 @@ def seeded_blob() -> Iterator[tuple[str, bytes]]:
     yield path, payload
 
     # Cleanup (best effort).
-    try:
+    with contextlib.suppress(httpx.HTTPError):
         httpx.delete(f"{TBOX_URL}/{subdir}", auth=auth)
-    except httpx.HTTPError:
-        pass
 
 
 @pytest.mark.asyncio

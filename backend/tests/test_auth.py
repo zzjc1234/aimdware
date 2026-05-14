@@ -1,7 +1,10 @@
 """TDD: token-hash bearer auth."""
+
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC
+from typing import Annotated
 
 import pytest
 from fastapi import Depends, FastAPI
@@ -23,7 +26,7 @@ def app(engine: Engine):
     a = FastAPI()
 
     @a.get("/me")
-    def me(user: User = Depends(authenticate_student)):  # noqa: ANN001
+    def me(user: Annotated[User, Depends(authenticate_student)]):  # noqa: ANN201
         return {"jaccount": user.jaccount}
 
     def override_session():
@@ -43,9 +46,7 @@ def _seed_user_with_token(session: Session, plaintext: str) -> User:
     user = User(display_name="A", email=f"{plaintext}@x", jaccount=plaintext[:32])
     session.add(user)
     session.commit()
-    session.add(
-        StudentToken(user_id=user.id, token_hash=_hash(plaintext), prefix=plaintext[:8])
-    )
+    session.add(StudentToken(user_id=user.id, token_hash=_hash(plaintext), prefix=plaintext[:8]))
     session.commit()
     return user
 
@@ -77,12 +78,12 @@ def test_revoked_token_is_401(client: TestClient, session: Session) -> None:
     plaintext = "st_REVOKED_007"
     _seed_user_with_token(session, plaintext)
     # mark all tokens revoked
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     for row in session.exec(  # noqa: SLF001 — test
         __import__("sqlmodel").select(StudentToken)
     ).all():
-        row.revoked_at = datetime.now(timezone.utc)
+        row.revoked_at = datetime.now(UTC)
         session.add(row)
     session.commit()
 
@@ -100,14 +101,12 @@ def test_inactive_user_is_401(client: TestClient, session: Session) -> None:
     assert r.status_code == 401
 
 
-def test_one_active_token_per_user_lookup_picks_it(
-    client: TestClient, session: Session
-) -> None:
+def test_one_active_token_per_user_lookup_picks_it(client: TestClient, session: Session) -> None:
     """Multiple historical tokens — only the active one authorizes."""
     user = User(display_name="A", email="a@x", jaccount="multitok")
     session.add(user)
     session.commit()
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     # old token, revoked
     session.add(
@@ -115,7 +114,7 @@ def test_one_active_token_per_user_lookup_picks_it(
             user_id=user.id,
             token_hash=_hash("st_OLD_REVOKED"),
             prefix="st_OLD_R",
-            revoked_at=datetime.now(timezone.utc),
+            revoked_at=datetime.now(UTC),
         )
     )
     # current active token

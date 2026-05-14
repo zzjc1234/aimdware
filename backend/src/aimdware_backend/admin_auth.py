@@ -1,4 +1,5 @@
 """Shared-secret bearer auth for /admin/* endpoints."""
+
 from __future__ import annotations
 
 import hmac
@@ -28,7 +29,7 @@ def authenticate_admin(
             detail="missing admin bearer",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    token = authorization[len("bearer "):].strip()
+    token = authorization[len("bearer ") :].strip()
     if not hmac.compare_digest(token, settings.admin_secret):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

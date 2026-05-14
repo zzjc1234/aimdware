@@ -30,7 +30,8 @@ function body(id: string): IngestBody {
 }
 
 afterEach(() => {
-  for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  for (const d of tmpDirs.splice(0))
+    rmSync(d, { recursive: true, force: true });
 });
 
 test("enqueue starts in 'captured' state", () => {
@@ -131,8 +132,12 @@ test("opening a legacy queue.db (no session_id column) auto-migrates without thr
 
   // Opening with the new code must not throw, and must add session_id.
   const q = new IngestQueue(path);
-  const cols = (q as unknown as { db: { prepare: (s: string) => { all: () => Array<{ name: string }> } } })
-    .db.prepare("PRAGMA table_info(outbox)")
+  const cols = (
+    q as unknown as {
+      db: { prepare: (s: string) => { all: () => Array<{ name: string }> } };
+    }
+  ).db
+    .prepare("PRAGMA table_info(outbox)")
     .all();
   expect(cols.some((c) => c.name === "session_id")).toBe(true);
   expect(q.statusOf("legacy-1")?.state).toBe("done");
@@ -173,7 +178,9 @@ test("pickReady returns records in any active state (captured / ingested / synce
   q.advance("c", "synced", 0);
 
   const ready = q.pickReady(1000, 10);
-  const byState = Object.fromEntries(ready.map((r) => [r.body.record_id, r.state]));
+  const byState = Object.fromEntries(
+    ready.map((r) => [r.body.record_id, r.state]),
+  );
   expect(byState).toEqual({ a: "captured", b: "ingested", c: "synced" });
   q.close();
 });

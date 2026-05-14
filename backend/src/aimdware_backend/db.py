@@ -1,13 +1,13 @@
 """Database engine + session dependency."""
+
 from __future__ import annotations
 
-from typing import Iterator
+from collections.abc import Iterator
 
 from sqlalchemy import Engine
 from sqlmodel import Session, create_engine
 
 from aimdware_backend.settings import settings
-
 
 _engine: Engine | None = None
 
@@ -19,9 +19,7 @@ def get_engine() -> Engine:
         _engine = create_engine(
             settings.database_url,
             connect_args=(
-                {"check_same_thread": False}
-                if settings.database_url.startswith("sqlite")
-                else {}
+                {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
             ),
         )
     return _engine

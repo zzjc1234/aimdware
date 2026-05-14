@@ -1,15 +1,15 @@
 """Alembic env. Reads DB URL from $AIMDWARE_DATABASE_URL via our settings,
 and targets SQLModel.metadata so `alembic revision --autogenerate` works."""
+
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
-from alembic import context
-
 # Importing the models registers every table with SQLModel.metadata.
 from aimdware_backend import models  # noqa: F401
 from aimdware_backend.settings import settings
+from alembic import context
 
 config = context.config
 if config.config_file_name is not None:

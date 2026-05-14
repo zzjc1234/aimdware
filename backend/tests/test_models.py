@@ -1,4 +1,5 @@
 """TDD: SQLModel schemas."""
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -49,9 +50,7 @@ def test_user_jaccount_unique(session: Session) -> None:
 
 
 def test_course_code_unique(session: Session) -> None:
-    session.add(
-        Course(code="ECE4721J", title="Intro to Systems", semester="2026-spring")
-    )
+    session.add(Course(code="ECE4721J", title="Intro to Systems", semester="2026-spring"))
     session.commit()
     session.add(Course(code="ECE4721J", title="dup", semester="2026-fall"))
     with pytest.raises(IntegrityError):

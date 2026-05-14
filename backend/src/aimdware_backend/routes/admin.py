@@ -1,4 +1,5 @@
 """Admin endpoints — TT-facing, shared-secret bearer auth."""
+
 from __future__ import annotations
 
 import hashlib
@@ -13,7 +14,6 @@ from aimdware_backend.db import get_session
 from aimdware_backend.jbox import JboxNotFound, JboxReader, default_reader
 from aimdware_backend.models import ContextRecord
 
-
 router = APIRouter(
     prefix="/admin",
     tags=["admin"],
@@ -26,9 +26,7 @@ def get_jbox_reader() -> JboxReader:
     return default_reader()
 
 
-def _latest_record_for_session(
-    session: Session, session_id: UUID
-) -> ContextRecord | None:
+def _latest_record_for_session(session: Session, session_id: UUID) -> ContextRecord | None:
     # turn_count is monotonically increasing within a session (enforced by
     # a UNIQUE(session_id, turn_count) DB constraint), but we still tiebreak
     # on ts.desc() defensively. If two records ever did share a turn_count,
@@ -43,19 +41,13 @@ def _latest_record_for_session(
     ).first()
 
 
-async def _fetch_and_verify(
-    record: ContextRecord, reader: JboxReader
-) -> tuple[bytes, bool]:
+async def _fetch_and_verify(record: ContextRecord, reader: JboxReader) -> tuple[bytes, bool]:
     try:
         bytes_ = await reader.get(record.blob_uri)
     except JboxNotFound:
-        raise HTTPException(
-            status_code=404, detail="blob missing from jbox"
-        ) from None
+        raise HTTPException(status_code=404, detail="blob missing from jbox") from None
     except Exception as exc:
-        raise HTTPException(
-            status_code=502, detail=f"jbox fetch failed: {exc}"
-        ) from None
+        raise HTTPException(status_code=502, detail=f"jbox fetch failed: {exc}") from None
     actual = hashlib.sha256(bytes_).digest()
     return bytes_, actual == record.blob_hash
 

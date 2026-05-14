@@ -1,4 +1,5 @@
 """Ingest API — the only HTTP surface the student router talks to."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -20,7 +21,6 @@ from aimdware_backend.models import (
     Role,
     User,
 )
-
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
@@ -48,9 +48,7 @@ class IngestContextBody(BaseModel):
     client_meta: dict[str, Any] = Field(default_factory=dict)
 
 
-def _resolve_enrolled_course(
-    session: Session, user: User, course_code: str
-) -> Course:
+def _resolve_enrolled_course(session: Session, user: User, course_code: str) -> Course:
     course = session.exec(select(Course).where(Course.code == course_code)).first()
     if course is None:
         raise HTTPException(status_code=404, detail="course not found")
@@ -62,9 +60,7 @@ def _resolve_enrolled_course(
         )
     ).first()
     if enrol is None:
-        raise HTTPException(
-            status_code=403, detail="not enrolled as student in this course"
-        )
+        raise HTTPException(status_code=403, detail="not enrolled as student in this course")
     return course
 
 

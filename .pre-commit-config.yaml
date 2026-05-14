@@ -1,0 +1,47 @@
+# Run with:   uv run --project backend prek run --all-files
+# Install :   uv run --project backend prek install      (one-time, hooks .git/hooks)
+#
+# Tooling lives where the language lives:
+#   - oxfmt + oxlint:  llm-client/  (bun devDeps + .oxfmtrc.json + .oxlintrc.json)
+#   - ruff:            backend/     (uv dev dep + [tool.ruff] in pyproject)
+#   - prek itself:     backend/     (uv dev dep)
+exclude: '^(third_party/|.*/dist/|.*/node_modules/|.*/\.venv/|backend/alembic/versions/)'
+
+repos:
+  # --- generic ---
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+
+  # --- Python: backend/ ---
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.5
+    hooks:
+      - id: ruff-check
+        types_or: [python, pyi]
+        args: ["--fix"]
+      - id: ruff-format
+        types_or: [python, pyi]
+
+  # --- TypeScript: llm-client/ ---
+  - repo: https://github.com/oxc-project/mirrors-oxlint
+    rev: v1.41.0
+    hooks:
+      - id: oxlint
+        types_or: [javascript, jsx, ts, tsx]
+        verbose: true
+
+  - repo: local
+    hooks:
+      - id: oxfmt
+        name: oxfmt
+        # pre-commit runs from repo root; cd into the workspace where
+        # oxfmt is installed as a Bun devDep + .oxfmtrc.json lives.
+        entry: bash -c 'cd llm-client && bun run format'
+        language: system
+        files: '^llm-client/.*\.(ts|tsx|js|jsx)$'
+        pass_filenames: false

@@ -12,6 +12,7 @@ Subcommands:
     token issue / token revoke / token list
     record list  / record payload
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,13 +39,10 @@ from aimdware_backend.models import (
     utcnow,
 )
 
-
 # --- importable command functions (also covered by tests) ---------------
 
 
-def user_create(
-    session: Session, *, jaccount: str, email: str, display_name: str
-) -> User:
+def user_create(session: Session, *, jaccount: str, email: str, display_name: str) -> User:
     """Create a new User row and return it."""
     user = User(jaccount=jaccount, email=email, display_name=display_name)
     session.add(user)
@@ -61,9 +59,7 @@ def user_get(session: Session, jaccount: str) -> User:
     return user
 
 
-def course_create(
-    session: Session, *, code: str, title: str, semester: str
-) -> Course:
+def course_create(session: Session, *, code: str, title: str, semester: str) -> Course:
     """Create a new Course row and return it."""
     course = Course(code=code, title=title, semester=semester)
     session.add(course)
@@ -179,12 +175,8 @@ def _cmd_user_list(session: Session, _args: argparse.Namespace) -> None:
 
 
 def _cmd_course_create(session: Session, args: argparse.Namespace) -> None:
-    c = course_create(
-        session, code=args.code, title=args.title, semester=args.semester
-    )
-    _print_json(
-        {"id": str(c.id), "code": c.code, "title": c.title, "semester": c.semester}
-    )
+    c = course_create(session, code=args.code, title=args.title, semester=args.semester)
+    _print_json({"id": str(c.id), "code": c.code, "title": c.title, "semester": c.semester})
 
 
 def _cmd_course_list(session: Session, _args: argparse.Namespace) -> None:
@@ -221,9 +213,7 @@ def _cmd_enroll(session: Session, args: argparse.Namespace) -> None:
 def _cmd_token_issue(session: Session, args: argparse.Namespace) -> None:
     tok, plaintext = token_issue(session, jaccount=args.user)
     # Plaintext shown EXACTLY ONCE — student must save it now.
-    _print_json(
-        {"plaintext": plaintext, "prefix": tok.prefix, "id": str(tok.id)}
-    )
+    _print_json({"plaintext": plaintext, "prefix": tok.prefix, "id": str(tok.id)})
 
 
 def _cmd_token_revoke(session: Session, args: argparse.Namespace) -> None:
@@ -244,9 +234,7 @@ def _cmd_token_list(session: Session, args: argparse.Namespace) -> None:
                 "user_id": str(t.user_id),
                 "prefix": t.prefix,
                 "created_at": t.created_at.isoformat(),
-                "revoked_at": (
-                    t.revoked_at.isoformat() if t.revoked_at else None
-                ),
+                "revoked_at": (t.revoked_at.isoformat() if t.revoked_at else None),
             }
             for t in rows
         ]
@@ -284,9 +272,7 @@ def _cmd_record_list(session: Session, args: argparse.Namespace) -> None:
     )
 
 
-async def _cmd_record_payload(
-    session: Session, args: argparse.Namespace
-) -> None:
+async def _cmd_record_payload(session: Session, args: argparse.Namespace) -> None:
     """Fetch the blob from Tbox and verify its hash."""
     from aimdware_backend.jbox import JboxNotFound, default_reader
 
@@ -360,9 +346,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_ti.add_argument("--user", required=True, help="user jaccount")
     p_ti.set_defaults(func=_cmd_token_issue)
     p_tr = s_tok.add_parser("revoke")
-    p_tr.add_argument(
-        "--prefix", required=True, help="8-char prefix shown when issued"
-    )
+    p_tr.add_argument("--prefix", required=True, help="8-char prefix shown when issued")
     p_tr.set_defaults(func=_cmd_token_revoke)
     p_tl = s_tok.add_parser("list")
     p_tl.add_argument("--user", default=None)

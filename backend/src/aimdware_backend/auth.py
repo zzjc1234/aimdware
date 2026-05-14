@@ -1,4 +1,5 @@
 """Token-hash bearer auth for /ingest/*."""
+
 from __future__ import annotations
 
 import hashlib

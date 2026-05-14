@@ -7,8 +7,16 @@ import { loadConfig, type Config } from "./config";
 import { createHandler } from "./http/handler";
 import { startServer } from "./http/server";
 import { IngestQueue } from "./outbox/queue";
-import { startWorkerLoop, type Stages, type StageHandler } from "./outbox/relay";
-import { postContext, confirmUploaded, type IngestBody } from "./outbox/ingest-client";
+import {
+  startWorkerLoop,
+  type Stages,
+  type StageHandler,
+} from "./outbox/relay";
+import {
+  postContext,
+  confirmUploaded,
+  type IngestBody,
+} from "./outbox/ingest-client";
 import { syncBlob, makeWebDAVPut, type WebDAVPutLike } from "./outbox/sync";
 import { writeAtomic, bytesToHex, redactToken, sessionBlobPath } from "./util";
 import { startEvictionLoop } from "./outbox/eviction";
@@ -80,7 +88,11 @@ function buildStages(
       case "exists":
         return { kind: "advance" };
       case "conflict":
-        return { kind: "terminal", finalState: "conflict", reason: "body mismatch" };
+        return {
+          kind: "terminal",
+          finalState: "conflict",
+          reason: "body mismatch",
+        };
       case "fatal":
         return { kind: "terminal", finalState: "fatal", reason: r.reason };
       case "retryable":
@@ -134,7 +146,10 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
   try {
     yamlText = await readFile(configPath, "utf-8");
   } catch (e) {
-    console.error(`failed to read config at ${configPath}:`, (e as Error).message);
+    console.error(
+      `failed to read config at ${configPath}:`,
+      (e as Error).message,
+    );
     process.exit(1);
   }
 
@@ -223,7 +238,9 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
   console.log(
     `aimdware-router listening on http://${handle.hostname}:${handle.port}`,
   );
-  console.log(`  upstream:    ${config.upstream.base_url} (${config.upstream.type})`);
+  console.log(
+    `  upstream:    ${config.upstream.base_url} (${config.upstream.type})`,
+  );
   console.log(`  upstream key: ${redactToken(config.upstream.api_key)}`);
   console.log(`  student token: ${redactToken(config.student_token)}`);
   console.log(`  course:      ${config.course}`);

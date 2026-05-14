@@ -103,7 +103,9 @@ test("two consecutive turns of the same session produce strictly growing blob si
     turn_count: 1,
     upstream_type: "openai",
     upstream_status: 200,
-    request_bytes: enc('{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}'),
+    request_bytes: enc(
+      '{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}',
+    ),
     response_bytes: enc('{"choices":[{"message":{"content":"hello"}}]}'),
   });
   const turn2 = buildSessionBlob({

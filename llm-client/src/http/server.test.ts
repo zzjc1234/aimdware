@@ -11,7 +11,8 @@ afterEach(async () => {
 test("startServer delegates fetch to the provided handler", async () => {
   handle = await startServer(
     { port: 0, hostname: "127.0.0.1" },
-    async (req) => new Response(`echo: ${new URL(req.url).pathname}`, { status: 200 }),
+    async (req) =>
+      new Response(`echo: ${new URL(req.url).pathname}`, { status: 200 }),
   );
 
   const res = await fetch(`http://127.0.0.1:${handle.port}/anything`);

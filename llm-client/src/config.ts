@@ -29,7 +29,6 @@ export function loadConfig(yamlText: string): Config {
   const parsed = RawConfigSchema.parse(raw);
   return {
     ...parsed,
-    jbox_remote_path:
-      parsed.jbox_remote_path ?? `aimdware/${parsed.course}`,
+    jbox_remote_path: parsed.jbox_remote_path ?? `aimdware/${parsed.course}`,
   };
 }
