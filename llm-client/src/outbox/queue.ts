@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import type { IngestBody } from "./ingest";
+import type { IngestBody } from "./ingest-client";
 
 /**
  * Per-record lifecycle.

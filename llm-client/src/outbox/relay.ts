@@ -1,6 +1,6 @@
 import type { IngestQueue, RecordState } from "./queue";
-import type { IngestBody } from "./ingest";
-import { StoppableSleep } from "./util";
+import type { IngestBody } from "./ingest-client";
+import { StoppableSleep } from "../util";
 
 export const DEFAULT_BACKOFF: number[] = [
   1_000, 5_000, 30_000, 5 * 60_000, 30 * 60_000, 60 * 60_000,

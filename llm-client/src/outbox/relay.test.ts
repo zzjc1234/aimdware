@@ -3,14 +3,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { IngestQueue } from "./queue";
-import type { IngestBody } from "./ingest";
+import type { IngestBody } from "./ingest-client";
 import {
   nextBackoff,
   DEFAULT_BACKOFF,
   runOnce,
   type Stages,
   type StageHandler,
-} from "./ingest-worker";
+} from "./relay";
 
 const tmpDirs: string[] = [];
 function freshQueue() {

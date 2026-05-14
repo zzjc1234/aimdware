@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { IngestQueue } from "./queue";
-import type { IngestBody } from "./ingest";
+import type { IngestBody } from "./ingest-client";
 
 const tmpDirs: string[] = [];
 

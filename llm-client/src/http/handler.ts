@@ -1,4 +1,4 @@
-import { captureChat, type CaptureResult } from "./capture";
+import { captureChat, type CaptureResult } from "../recording/capture";
 import { proxyChat, type FetchLike, type UpstreamConfig } from "./proxy";
 
 export type HandlerOpts = {

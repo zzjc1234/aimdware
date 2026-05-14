@@ -13,8 +13,8 @@ import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildSyncStage } from "./main";
-import type { WebDAVPutLike } from "./sync";
-import type { IngestBody } from "./ingest";
+import type { WebDAVPutLike } from "./outbox/sync";
+import type { IngestBody } from "./outbox/ingest-client";
 import { writeAtomic } from "./util";
 
 const tmpDirs: string[] = [];

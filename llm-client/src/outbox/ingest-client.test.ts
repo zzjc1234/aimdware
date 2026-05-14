@@ -1,6 +1,6 @@
 import { test, expect, afterEach } from "bun:test";
 import type { Server } from "bun";
-import { postContext, type IngestBody, type PostContextResult } from "./ingest";
+import { postContext, type IngestBody, type PostContextResult } from "./ingest-client";
 
 let fakeBackend: Server<unknown> | undefined;
 let lastReq: { body: string; auth: string | null; url: string } | undefined;
@@ -117,7 +117,7 @@ test("network error -> retryable", async () => {
 });
 
 // -------- confirmUploaded --------
-import { confirmUploaded } from "./ingest";
+import { confirmUploaded } from "./ingest-client";
 
 test("confirmUploaded POSTs to /ingest/context/{id}/uploaded with bearer auth", async () => {
   const url = startFakeBackend(202);

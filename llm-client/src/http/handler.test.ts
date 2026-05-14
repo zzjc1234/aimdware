@@ -1,7 +1,7 @@
 import { test, expect, afterEach, beforeEach } from "bun:test";
 import type { Server } from "bun";
 import { createHandler } from "./handler";
-import type { CaptureResult } from "./capture";
+import type { CaptureResult } from "../recording/capture";
 
 let fakeUpstream: Server<unknown> | undefined;
 

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { IngestQueue } from "./queue";
-import type { IngestBody } from "./ingest";
+import type { IngestBody } from "./ingest-client";
 import { runEvictionOnce } from "./eviction";
 
 const tmpDirs: string[] = [];

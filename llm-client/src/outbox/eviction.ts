@@ -1,6 +1,6 @@
 import { unlink } from "node:fs/promises";
 import type { IngestQueue } from "./queue";
-import { StoppableSleep, sessionBlobPath } from "./util";
+import { StoppableSleep, sessionBlobPath } from "../util";
 
 export type EvictionOpts = {
   queue: IngestQueue;

@@ -1,5 +1,5 @@
-import { getProxyForUrl } from "./net";
-import type { FetchLike } from "./proxy";
+import { getProxyForUrl } from "../http/net";
+import type { FetchLike } from "../http/proxy";
 
 export type IngestBody = {
   record_id: string;
