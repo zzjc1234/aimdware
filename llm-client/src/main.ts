@@ -20,6 +20,7 @@ import {
 import { syncBlob, makeWebDAVPut, type WebDAVPutLike } from "./outbox/sync";
 import { writeAtomic, bytesToHex, redactToken, sessionBlobPath } from "./util";
 import {
+  PendingSessionWrites,
   runSessionCacheCleanupOnce,
   startEvictionLoop,
 } from "./outbox/eviction";
@@ -163,7 +164,7 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
 
   const queue = new IngestQueue(queueDb);
   const sessionTracker = new SessionTracker();
-  const pendingCacheWrites = new Set<string>();
+  const pendingCacheWrites = new PendingSessionWrites();
   const webdavPut = makeWebDAVPut(
     config.tbox_url,
     config.tbox_user
@@ -194,7 +195,7 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
       });
 
       const blobPath = sessionBlobPath(cacheDir, cls.session_id);
-      pendingCacheWrites.add(cls.session_id);
+      pendingCacheWrites.begin(cls.session_id);
       try {
         try {
           await writeAtomic(blobPath, blob.blob_bytes);
@@ -225,7 +226,7 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
           `captured record=${result.record_id} session=${cls.session_id} turn=${cls.turn_count} hash=${hex}… size=${blob.blob_size} -> queued`,
         );
       } finally {
-        pendingCacheWrites.delete(cls.session_id);
+        pendingCacheWrites.end(cls.session_id);
       }
     },
   });
@@ -241,15 +242,12 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
       stages: buildStages(config, cacheDir, webdavPut),
       concurrency: 4,
       afterAdvance: async (body, from, to) => {
-        if (
-          from === "ingested" &&
-          to === "synced" &&
-          !pendingCacheWrites.has(body.session_id)
-        ) {
+        if (from === "ingested" && to === "synced") {
           await runSessionCacheCleanupOnce({
             queue,
             cacheDir,
             session_id: body.session_id,
+            isSessionPending: pendingCacheWrites.has,
           });
         }
       },
@@ -257,7 +255,11 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
     1000,
   );
 
-  const eviction = startEvictionLoop({ queue, cacheDir });
+  const eviction = startEvictionLoop({
+    queue,
+    cacheDir,
+    isSessionPending: pendingCacheWrites.has,
+  });
 
   console.log(
     `aimdware-router listening on http://${handle.hostname}:${handle.port}`,

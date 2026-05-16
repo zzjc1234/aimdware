@@ -178,7 +178,9 @@ once **no** record sharing that `session_id` remains in `captured` or
 `ingested`. Those are the only states that still need to read
 `records/<session_id>.json`. The periodic TTL pass uses the same
 condition as a fallback, with `ttlMs` defaulting to 24 hours. One delete
-per session; all member records get `cache_evicted = 1`.
+per session; all member records get `cache_evicted = 1`. If a same-session
+capture is currently writing the local blob, both cleanup paths skip that
+session and try again later.
 
 The queue row itself never deletes — it remains a per-record audit
 trail on the student's disk.

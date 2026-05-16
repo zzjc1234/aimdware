@@ -11,7 +11,11 @@ import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { IngestQueue } from "./queue";
 import type { IngestBody } from "./ingest-client";
-import { runEvictionOnce, runSessionCacheCleanupOnce } from "./eviction";
+import {
+  PendingSessionWrites,
+  runEvictionOnce,
+  runSessionCacheCleanupOnce,
+} from "./eviction";
 
 const tmpDirs: string[] = [];
 function fresh() {
@@ -80,6 +84,17 @@ afterEach(() => {
 
 const NOW = 100_000_000;
 const TTL = 24 * 3600 * 1000;
+
+test("pending session writes use refcounts for overlapping captures", () => {
+  const pending = new PendingSessionWrites();
+
+  pending.begin("S-overlap");
+  pending.begin("S-overlap");
+  pending.end("S-overlap");
+  expect(pending.has("S-overlap")).toBe(true);
+  pending.end("S-overlap");
+  expect(pending.has("S-overlap")).toBe(false);
+});
 
 test("evicts a single-turn session past TTL: deletes <session_id>.json + marks record", async () => {
   const { cacheDir, recordsDir, q } = fresh();
@@ -198,6 +213,40 @@ test("cleanup deletes a session cache immediately once every turn is synced or l
   q.close();
 });
 
+test("cleanup skips a reclaimable session while a cache write is pending", async () => {
+  const { cacheDir, recordsDir, q } = fresh();
+  q.enqueue(body("r1", "S-writing", 1), 0);
+  q.advance("r1", "ingested", 0);
+  q.advance("r1", "synced", 0);
+  writeFileSync(join(recordsDir, "S-writing.json"), "payload");
+  const pending = new PendingSessionWrites();
+  pending.begin("S-writing");
+  pending.begin("S-writing");
+  pending.end("S-writing");
+
+  const skipped = await runSessionCacheCleanupOnce({
+    queue: q,
+    cacheDir,
+    session_id: "S-writing",
+    isSessionPending: pending.has,
+  });
+  expect(skipped.sessions_evicted).toBe(0);
+  expect(existsSync(join(recordsDir, "S-writing.json"))).toBe(true);
+  expect(q.isEvicted("r1")).toBe(false);
+
+  pending.end("S-writing");
+  const cleaned = await runSessionCacheCleanupOnce({
+    queue: q,
+    cacheDir,
+    session_id: "S-writing",
+    isSessionPending: pending.has,
+  });
+  expect(cleaned.sessions_evicted).toBe(1);
+  expect(existsSync(join(recordsDir, "S-writing.json"))).toBe(false);
+  expect(q.isEvicted("r1")).toBe(true);
+  q.close();
+});
+
 test("cleanup keeps a session cache while any turn still needs upload", async () => {
   const { cacheDir, recordsDir, q } = fresh();
   q.enqueue(body("r1", "S-pending", 1), 0);
@@ -238,6 +287,41 @@ test("ttl eviction cleans up old synced sessions if fast cleanup was missed", as
 
   expect(summary.sessions_evicted).toBe(1);
   expect(existsSync(join(recordsDir, "S-synced-old.json"))).toBe(false);
+  expect(q.isEvicted("r1")).toBe(true);
+  q.close();
+});
+
+test("ttl eviction skips an old synced session while a cache write is pending", async () => {
+  const { cacheDir, recordsDir, q } = fresh();
+  q.enqueue(body("r1", "S-ttl-writing", 1), 0);
+  q.advance("r1", "ingested", 0);
+  q.advance("r1", "synced", 0);
+  backdate(cacheDir, "r1", NOW - TTL - 1000);
+  writeFileSync(join(recordsDir, "S-ttl-writing.json"), "payload");
+  const pending = new PendingSessionWrites();
+  pending.begin("S-ttl-writing");
+
+  const skipped = await runEvictionOnce({
+    queue: q,
+    cacheDir,
+    now: () => NOW,
+    ttlMs: TTL,
+    isSessionPending: pending.has,
+  });
+  expect(skipped.sessions_evicted).toBe(0);
+  expect(existsSync(join(recordsDir, "S-ttl-writing.json"))).toBe(true);
+  expect(q.isEvicted("r1")).toBe(false);
+
+  pending.end("S-ttl-writing");
+  const cleaned = await runEvictionOnce({
+    queue: q,
+    cacheDir,
+    now: () => NOW,
+    ttlMs: TTL,
+    isSessionPending: pending.has,
+  });
+  expect(cleaned.sessions_evicted).toBe(1);
+  expect(existsSync(join(recordsDir, "S-ttl-writing.json"))).toBe(false);
   expect(q.isEvicted("r1")).toBe(true);
   q.close();
 });

@@ -7,6 +7,7 @@ export type EvictionOpts = {
   cacheDir: string;
   now?: () => number;
   ttlMs?: number;
+  isSessionPending?: (session_id: string) => boolean;
   /** Max sessions to process per pass (not records). */
   limit?: number;
 };
@@ -18,6 +19,24 @@ export type EvictionSummary = {
 
 const DEFAULT_TTL_MS = 24 * 3600 * 1000;
 const DEFAULT_LIMIT = 500;
+
+export class PendingSessionWrites {
+  private counts = new Map<string, number>();
+
+  begin(session_id: string): void {
+    this.counts.set(session_id, (this.counts.get(session_id) ?? 0) + 1);
+  }
+
+  end(session_id: string): void {
+    const next = (this.counts.get(session_id) ?? 0) - 1;
+    if (next > 0) this.counts.set(session_id, next);
+    else this.counts.delete(session_id);
+  }
+
+  has = (session_id: string): boolean => {
+    return this.counts.has(session_id);
+  };
+}
 
 /**
  * Run one eviction pass over the cache directory.
@@ -44,6 +63,7 @@ export async function runEvictionOnce(
     opts.queue,
     opts.cacheDir,
     opts.queue.findEvictableSessions(threshold, limit),
+    opts.isSessionPending,
   );
 }
 
@@ -51,6 +71,7 @@ export type SessionCacheCleanupOpts = {
   queue: IngestQueue;
   cacheDir: string;
   session_id: string;
+  isSessionPending?: (session_id: string) => boolean;
 };
 
 /**
@@ -62,17 +83,24 @@ export async function runSessionCacheCleanupOnce(
   opts: SessionCacheCleanupOpts,
 ): Promise<EvictionSummary> {
   const session = opts.queue.findReclaimableSession(opts.session_id);
-  return evictSessions(opts.queue, opts.cacheDir, session ? [session] : []);
+  return evictSessions(
+    opts.queue,
+    opts.cacheDir,
+    session ? [session] : [],
+    opts.isSessionPending,
+  );
 }
 
 async function evictSessions(
   queue: IngestQueue,
   cacheDir: string,
   sessions: Array<{ session_id: string; record_ids: string[] }>,
+  isSessionPending?: (session_id: string) => boolean,
 ): Promise<EvictionSummary> {
   let sessions_evicted = 0;
   let records_marked = 0;
   for (const s of sessions) {
+    if (isSessionPending?.(s.session_id)) continue;
     let canMarkEvicted = true;
     try {
       await unlink(sessionBlobPath(cacheDir, s.session_id));
