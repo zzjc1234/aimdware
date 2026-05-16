@@ -43,6 +43,11 @@ Under these, no client-side software can guarantee monitoring.
   Requires modifying the source.
 - **Self-reported metadata.** Router version, agent client id, model
   string — a modified router can lie. Treat as advisory.
+- **Client-internal tools the router never sees.** If a client (e.g.
+  opencode) does a local Read tool call that mutates context **before**
+  hitting the LLM, the router only sees the result-as-text, not the
+  tool exchange. See [design-notes.md → "What the router does NOT
+  see"](design-notes.md).
 - **Subscription TOS.** If subscription support ever lands, students
   are responsible for compliance with the LLM provider's terms
   (Anthropic's Feb 2026 policy bans third-party OAuth use).

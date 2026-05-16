@@ -33,7 +33,7 @@ aimdware-admin token issue   --user alice          # revokes any prior active to
 aimdware-admin token revoke  --prefix st_K9aB6r    # 8-char prefix is shown when issued
 aimdware-admin token list    [--user alice]
 
-aimdware-admin record list   [--course X] [--user X] [--status pending|uploaded|...] [--limit N]
+aimdware-admin record list   [--course X] [--user X] [--assignment X] [--status pending|uploaded|...] [--limit N]
 aimdware-admin record payload --id <record_id>     # fetch blob from Tbox + verify sha256
 ```
 

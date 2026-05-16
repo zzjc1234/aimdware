@@ -1,169 +1,195 @@
 # Backend
 
-- Python 3.12 + FastAPI + SQLModel + Alembic + PostgreSQL
-- Auth: student-token bearer for `/ingest/*`. No sessions, no password
-  hashing in v1.
+- Python 3.13 + FastAPI + SQLModel + Alembic + SQLite (dev) / Postgres (prod)
+- Auth: student-token bearer for `/ingest/*`; shared-secret admin bearer
+  for `/admin/*`. No sessions, no password hashing.
 
-## Ingest API
+## Surfaces
 
-Caller: student router. Auth: student token in `Authorization: Bearer st_...`.
-Write-only — no endpoint returns content.
-
-| Method | Path                                   | Function |
-| ------ | -------------------------------------- | -------- |
-| `GET`  | `/ingest/health`                       | Unauthenticated liveness probe. |
-| `POST` | `/ingest/context`                      | Record one entry. Body: `{ record_id, course_code, blob_hash, blob_uri, blob_size, model, prompt_tokens, completion_tokens, ts, router_version, client_meta }`. Backend resolves `student_id` from the token, resolves `course_id` from `course_code`, verifies `Enrollment(student, course, role=student)` exists, inserts `ContextRecord` with `blob_status = pending`. **Idempotent on `record_id`**: a repeat POST with the same id returns `200` with the existing row (no double insert), provided the body matches; mismatched body → `409 Conflict`. New inserts return `202`. Returns `403` if the student is not enrolled in the named course. |
-| `POST` | `/ingest/context/{record_id}/uploaded` | Router calls this after `rclone copy` to the Tbox WebDAV endpoint reports success. Transitions `blob_status` to `uploaded`. Idempotent. |
-
-Blobs never traverse this surface — only the hash, URI, and metadata.
-
-## Datamodel
-
-SQLModel. The full schema is created at v1 time so later HTTP surfaces
-can be bolted on without migrations.
-
-```python
-from datetime import datetime
-from enum import Enum
-from typing import Optional
-from uuid import UUID, uuid4
-
-from sqlalchemy import BigInteger, Column, Index, JSON, LargeBinary
-from sqlmodel import Field, SQLModel
-
-
-class Role(str, Enum):
-    student = "student"
-    admin = "admin"      # TT — scoped to the courses where this row exists
-
-
-class BlobStatus(str, Enum):
-    pending = "pending"      # hash recorded; upload not confirmed
-    uploaded = "uploaded"    # router confirmed rclone push succeeded
-    verified = "verified"    # backend verified hash (post-v1)
-    tampered = "tampered"    # hash mismatch (post-v1)
-    missing = "missing"      # blob not found in jbox (post-v1)
-
-
-class User(SQLModel, table=True):
-    __tablename__ = "users"
-
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    display_name: str
-    email: str = Field(unique=True, index=True)
-    jaccount: str = Field(unique=True, index=True)
-    is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class Course(SQLModel, table=True):
-    __tablename__ = "courses"
-
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    code: str = Field(unique=True, index=True)
-    title: str
-    semester: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class Enrollment(SQLModel, table=True):
-    __tablename__ = "enrollments"
-
-    user_id: UUID = Field(foreign_key="users.id", primary_key=True)
-    course_id: UUID = Field(foreign_key="courses.id", primary_key=True)
-    role: Role
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class StudentToken(SQLModel, table=True):
-    __tablename__ = "student_tokens"
-
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    user_id: UUID = Field(foreign_key="users.id", index=True)
-    token_hash: bytes = Field(sa_column=Column(LargeBinary))
-    prefix: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    revoked_at: Optional[datetime] = None
-
-    # Partial unique index on (user_id) WHERE revoked_at IS NULL
-    # is created in the Alembic migration to enforce one active token per
-    # student. Course context is supplied per-request in /ingest/context.
-    __table_args__ = (Index("ix_student_tokens_user", "user_id"),)
-
-
-class ContextRecord(SQLModel, table=True):
-    __tablename__ = "context_records"
-
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    user_id: UUID = Field(foreign_key="users.id", index=True)
-    course_id: UUID = Field(foreign_key="courses.id", index=True)
-    ts: datetime = Field(default_factory=datetime.utcnow, index=True)
-    model: str
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    router_version: str
-    client_meta: dict = Field(default_factory=dict, sa_column=Column(JSON))
-
-    blob_uri: str
-    blob_hash: bytes = Field(sa_column=Column(LargeBinary))
-    blob_size: int = Field(sa_column=Column(BigInteger))
-    blob_status: BlobStatus = Field(default=BlobStatus.pending, index=True)
-    blob_verified_at: Optional[datetime] = None
+```
+/ingest/*    student router → here. metadata + hash only, no blob bytes.
+/admin/*     TT tooling → here. read-only audit. shared-secret auth.
 ```
 
-Notes:
+### Ingest API
 
-- One `StudentToken` per student. Rotation inserts a new row and sets
-  `revoked_at` on the old; the partial unique index enforces "at most
-  one active token per student".
-- Course context per ingest is supplied via `course_code` in the request
-  body. Backend resolves the course and verifies the student is enrolled
-  in it (`role = student`); otherwise rejects with 403.
-- `BlobStatus` reaches `uploaded` from the router's own POST. The TT's
-  `records fetch --verify` writes `verified` / `tampered` / `missing`
-  when they inspect a record.
-- `ContextRecord.id` is the router-generated idempotency key. The PK
-  uniqueness on `id` plus the API's "match existing row → 200, mismatch
-  → 409" semantics make `POST /ingest/context` safely retryable.
-- `blob_size` uses `BIGINT` (not `INTEGER`) — INTEGER tops out at 2 GB
-  and runaway blobs should fail loudly, not silently truncate.
+Caller: student router. Auth: student token in `Authorization: Bearer st_...`.
+
+| Method | Path | Function |
+|---|---|---|
+| `GET` | `/ingest/health` | Unauthenticated liveness. |
+| `POST` | `/ingest/context` | Record one entry (body below). Idempotent on `record_id`: replay-same-body returns 200; replay-different-body returns 409. Fresh insert returns 202. **Also** returns 409 if `(session_id, turn_count)` already exists with a different `record_id` (UNIQUE DB constraint). Returns 403 if the student isn't enrolled as a student in `course_code`. |
+| `POST` | `/ingest/context/{record_id}/uploaded` | Mark blob_status uploaded once the router confirms the WebDAV PUT. Idempotent. Scoped to the owning student. |
+
+Body of `POST /ingest/context`:
+
+```jsonc
+{
+  "record_id":   "<UUID>",
+  "session_id":  "<UUID>",
+  "turn_count":  1,
+  "course_code": "ECE4721J",
+  "assignment":  "hw1",
+  "blob_hash":   "<hex sha256>",
+  "blob_uri":    "aimdware/ECE4721J/hw1/<session_id>.json",
+  "blob_size":   1234,
+  "model":       "deepseek-chat",     // optional
+  "prompt_tokens":     0,             // optional
+  "completion_tokens": 0,             // optional
+  "ts":          "2026-05-15T...",
+  "router_version": "0.1.0",
+  "client_meta": { "upstream_type": "openai" }
+}
+```
+
+`blob_hash` is sha256 of the **blob file the router PUTs to WebDAV**,
+not of the upstream's response body. The backend never sees blob bytes
+in this surface; it only checks the hash later via the admin endpoints.
+
+### Admin API
+
+Caller: TT tooling (`aimdware-admin` CLI, or anything with the admin
+secret). Auth: `Authorization: Bearer <AIMDWARE_ADMIN_SECRET>`. Returns
+503 if `AIMDWARE_ADMIN_SECRET` is unset.
+
+| Method | Path | Function |
+|---|---|---|
+| `GET` | `/admin/context/{record_id}/payload` | Fetch the session blob from WebDAV, recompute sha256, return `verified` flag + the parsed payload. **For multi-turn sessions** the on-jbox blob is the latest turn's state; an older `record_id`'s hash will NOT match the current blob (the field `is_latest_turn` flags this). Use `/admin/session/<id>/payload` for canonical session-level verification. |
+| `GET` | `/admin/session/{session_id}/payload` | Same fetch but verifies against the LATEST turn of that session, which is what's actually on jbox. |
+
+Response shape (both endpoints):
+
+```jsonc
+{
+  "record_id":         "...",   // omitted on session endpoint
+  "session_id":        "...",
+  "turn_count":        N,
+  "is_latest_turn":    true,    // only on /admin/context/<record>/payload
+  "blob_uri":          "...",
+  "blob_size_stored":  N,
+  "blob_size_actual":  N,
+  "blob_hash_stored":  "<hex>",
+  "blob_hash_actual":  "<hex>",
+  "verified":          true,
+  "payload_utf8":      "<the parsed blob json, as text>"
+}
+```
+
+## Data model
+
+SQLModel-declared, Alembic-migrated. Schema diagram:
+
+```
+users(id, jaccount UNIQUE, email UNIQUE, display_name, is_active, ts)
+        ▲
+        │
+        ├── enrollments(user_id PK, course_id PK, role)
+        │              role ∈ {student, admin}
+        │
+        ├── student_tokens(id, user_id, token_hash bytes, prefix, ts, revoked_at)
+        │     UNIQUE INDEX (user_id) WHERE revoked_at IS NULL
+        │     -- at most one active token per user
+        │
+        └── context_records(
+              id PK,                       router-generated UUID (= record_id)
+              user_id   FK users,
+              course_id FK courses,
+              assignment   indexed,        free-form course-scoped label
+              session_id   indexed,        identifies the shared jbox blob
+              turn_count,                  1-based, unique within a session
+              ts indexed,
+              model, prompt_tokens, completion_tokens,
+              router_version, client_meta,
+              blob_uri, blob_hash bytes, blob_size,
+              blob_status indexed,         pending|uploaded|verified|tampered|missing
+              blob_verified_at,
+              UNIQUE (session_id, turn_count)
+            )
+
+courses(id, code UNIQUE, title, semester, ts)
+```
+
+### Why `session_id` is indexed but not foreign-keyed
+
+We don't model `Session` as a first-class entity. The session_id is
+generated by the router (in-memory UUID), shared by every record of a
+multi-turn conversation, and used only for grouping on the audit side.
+No relational integrity to enforce.
+
+### Why `assignment` is a string, not a FK
+
+Assignments are TT-decreed free-form labels (homework slug, lab number,
+exam name). Modelling them as entities would force admin overhead
+("create assignment row before students can use it") for no gain — TT
+audit is purely string-equality on this field.
+
+### BlobStatus semantics under multi-turn
+
+```
+pending     after POST /ingest/context, before /uploaded
+uploaded    router confirmed WebDAV PUT
+verified    TT ran a manual hash check via admin endpoint AND it matched
+tampered    same, but hash mismatched
+missing     same, but blob not found on WebDAV
+```
+
+**Important for multi-turn:** `uploaded` on a record means "the router
+successfully PUT a snapshot at the time of that turn". It does NOT
+mean "this record's blob_hash matches what's currently on jbox" —
+because subsequent turns OVERWRITE the jbox file. Only the latest
+turn's hash matches at any given moment. The `is_latest_turn` flag on
+the admin endpoint surfaces this.
 
 ## Token validation
 
-The plaintext token never lives on the backend. Each ingest request:
+Plaintext lives only on the student's machine. Backend stores
+`sha256(token)`. Per request:
 
 ```
-1. plaintext = request.headers["Authorization"].removeprefix("Bearer ")
-2. hash = sha256(plaintext)
-3. row = SELECT user_id FROM student_tokens
-         WHERE token_hash = hash AND revoked_at IS NULL
+1. plaintext = Authorization header (Bearer)
+2. digest    = sha256(plaintext)
+3. row       = SELECT user_id FROM student_tokens
+               WHERE token_hash = digest AND revoked_at IS NULL
 4. if not row: return 401
-5. inject user_id into request.context
+5. inject user_id into request context
 ```
 
-Implementation notes:
+Implementation:
 
-- The DB equality on `token_hash` (a fixed-length `bytea`) is constant-time
-  for our purposes; no need for `hmac.compare_digest` after the lookup
-  succeeds (the row matched by definition).
-- `Authorization` is added to the logger's redact set, so plaintext
-  never appears in stdout / file logs.
-- We use plain sha256, not argon2 / bcrypt. Tokens are 256-bit random
-  secrets — search space is 2²⁵⁶, rainbow tables don't apply. Slow
-  hashing exists to penalize weak passwords; it's not needed here.
+- DB equality on a fixed-length `bytea` is constant-time in practice.
+- `Authorization` header is on the logger's redact list.
+- Plain sha256, not argon2/bcrypt. Tokens are 256-bit random secrets;
+  slow hashing protects passwords, not high-entropy random strings.
 
-## Security
+## Migrations
+
+Production schema is owned by Alembic, not `SQLModel.metadata.create_all`:
+
+```
+backend/alembic/versions/
+  ad7b66d6bff9_0001_initial_schema.py       full v1 schema + partial unique index
+  1cc659f78871_0002_unique_session_turn.py  UNIQUE(session_id, turn_count)
+  b984da6ac5c5_0003_add_assignment...py     ADD COLUMN assignment + index
+```
+
+Apply: `AIMDWARE_DATABASE_URL=... uv run alembic upgrade head`.
+
+Tests use `create_all` for speed, plus a fixture in `conftest.py` that
+manually mirrors the partial unique index (which SQLModel can't
+express).
+
+## Security recap
 
 - **Token → student attribution.** The token identifies the student;
-  the router cannot impersonate someone else by tampering with the body.
-- **Course is verified per request.** Backend rejects ingest for any
-  course the student is not enrolled in.
-- **Write-only ingest.** No HTTP read surface, so a stolen student
-  token writes at most fake records for that student's enrolled courses.
-- **No content on the backend.** Postgres holds metadata + hash + URI.
-  A full DB compromise yields no student work.
-- **DB compromise leaks no usable token.** Only `sha256(token)` is
-  stored. Rotation is the response to a suspected leak — see
-  [admin-script.md](admin-script.md).
-- **Constant-time compare** on student-token validation; tokens never
-  in logs.
+  router cannot impersonate someone else by body-tampering.
+- **Write-only ingest from the student side.** A stolen student token
+  can write fake records for their enrolled courses; it cannot read.
+- **No blob bytes on backend.** Postgres holds metadata + hash + URI
+  only. A full DB compromise yields no student work — the work is
+  on jbox accounts the backend can't decrypt.
+- **DB compromise leaks no usable token.** Only `sha256(token)`.
+  Rotation is the response (see `aimdware-admin token issue`).
+- **Admin endpoints are gated by a shared secret** (`AIMDWARE_ADMIN_SECRET`).
+  Leaks of that secret give read-only audit access. The backend still
+  needs WebDAV creds to actually fetch blobs — those live in
+  `AIMDWARE_TBOX_USER`/`AIMDWARE_TBOX_PASS`.
