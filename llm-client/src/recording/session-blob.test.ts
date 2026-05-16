@@ -166,6 +166,45 @@ test("streaming SSE response stays as a raw string under `response`", () => {
   expect(obj.response).toBe(sse);
 });
 
+test("Responses API request and streamed response dump without schema conversion", () => {
+  const requestText = JSON.stringify({
+    model: "gpt-5.3-codex",
+    instructions: "Follow the course policy.",
+    input: [
+      {
+        role: "user",
+        content: [{ type: "input_text", text: "explain AIMD" }],
+      },
+    ],
+    store: false,
+    stream: true,
+  });
+  const sse =
+    'event: response.output_text.delta\ndata: {"delta":"AIMD"}\n\n' +
+    'event: response.completed\ndata: {"id":"resp_123"}\n\n';
+  const r = buildSessionBlob({
+    session_id: "11111111-2222-3333-4444-555555555555",
+    course: "ECE4721J",
+    assignment: "hw1",
+    started_at: new Date("2026-05-13T10:00:00Z"),
+    latest_ts: new Date("2026-05-13T10:01:00Z"),
+    turn_count: 1,
+    upstream_type: "codex",
+    upstream_status: 200,
+    request_bytes: enc(requestText),
+    response_bytes: enc(sse),
+  });
+
+  const obj = JSON.parse(dec(r.blob_bytes));
+  expect(obj.request.model).toBe("gpt-5.3-codex");
+  expect(obj.request.instructions).toBe("Follow the course policy.");
+  expect(obj.request.input[0].content[0].text).toBe("explain AIMD");
+  expect(obj.request.store).toBe(false);
+  expect(obj.request.stream).toBe(true);
+  expect(typeof obj.response).toBe("string");
+  expect(obj.response).toContain("response.output_text.delta");
+});
+
 test("unparseable request bytes are kept verbatim under `request` (as a string)", () => {
   const r = buildSessionBlob({
     session_id: "x",

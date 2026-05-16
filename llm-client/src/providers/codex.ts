@@ -4,7 +4,7 @@ import {
   type ProviderFetchOpts,
   type ProviderRuntime,
 } from "./plugin";
-import { userAgent } from "./plugin";
+import { fetchWithProxy, userAgent } from "./plugin";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER = "https://auth.openai.com";
@@ -63,15 +63,19 @@ async function refreshAccessToken(
   refreshToken: string,
   opts: Required<ProviderFetchOpts>,
 ): Promise<TokenResponse> {
-  const response = await opts.fetchImpl(`${ISSUER}/oauth/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: CLIENT_ID,
-    }).toString(),
-  });
+  const response = await fetchWithProxy(
+    opts.fetchImpl,
+    `${ISSUER}/oauth/token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: CLIENT_ID,
+      }).toString(),
+    },
+  );
   if (!response.ok) {
     throw new Error(`Codex token refresh failed: ${response.status}`);
   }
@@ -107,6 +111,21 @@ async function currentAuth(opts: CodexProviderOpts): Promise<OAuthAuth> {
   return next;
 }
 
+function codexRequestBody(body: ArrayBuffer | undefined): RequestInit["body"] {
+  if (!body) return body;
+  const text = new TextDecoder().decode(body);
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      delete (parsed as { max_output_tokens?: unknown }).max_output_tokens;
+      return JSON.stringify(parsed);
+    }
+  } catch {
+    // Forward non-JSON bodies unchanged so upstream produces the protocol error.
+  }
+  return body;
+}
+
 export function createCodexProvider(opts: CodexProviderOpts): ProviderRuntime {
   const prepareResponses = async (
     input: Parameters<ProviderRuntime["prepareResponses"]>[0],
@@ -115,6 +134,7 @@ export function createCodexProvider(opts: CodexProviderOpts): ProviderRuntime {
     const headers = new Headers(input.headers);
     headers.delete("authorization");
     headers.delete("Authorization");
+    headers.delete("x-api-key");
     headers.set("authorization", `Bearer ${auth.access}`);
     headers.set("originator", "aimdware-router");
     headers.set("User-Agent", userAgent());
@@ -125,7 +145,7 @@ export function createCodexProvider(opts: CodexProviderOpts): ProviderRuntime {
       url: new URL(CODEX_API_ENDPOINT),
       method: input.method,
       headers,
-      body: input.body,
+      body: codexRequestBody(input.body),
     };
   };
 

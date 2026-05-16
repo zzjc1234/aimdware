@@ -29,17 +29,17 @@ export type SessionBlobResult = {
  *   {
  *     session_id, course, started_at, latest_ts, turn_count,
  *     upstream: { type }, upstream_status,
- *     request:  <the parsed chat-completion body verbatim>,
+ *     request:  <the parsed upstream request body verbatim>,
  *     response: <the parsed response body, or the raw string if not JSON
  *               (streaming SSE comes through as a string here)>
  *   }
  *
- * Consumers read `request.messages`, `request.tools`, `request.model`,
- * `request.temperature`, etc. directly. We do NOT extract individual
- * fields onto the blob root — that just means we'd have to extend the
- * extractor every time the upstream protocol gains a parameter
- * (response_format, parallel_tool_calls, reasoning_effort, …). Source
- * of truth, single place.
+ * Consumers read `request.messages` or `request.input`, `request.tools`,
+ * `request.model`, `request.temperature`, etc. directly. We do NOT
+ * extract individual fields onto the blob root — that just means we'd
+ * have to extend the extractor every time the upstream protocol gains a
+ * parameter (response_format, parallel_tool_calls, reasoning_effort, …).
+ * Source of truth, single place.
  */
 export function buildSessionBlob(input: SessionBlobInput): SessionBlobResult {
   const reqText = decodeBytes(input.request_bytes);

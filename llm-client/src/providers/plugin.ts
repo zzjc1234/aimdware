@@ -1,4 +1,5 @@
 import type { FetchLike } from "../http/proxy";
+import { getProxyForUrl } from "../http/net";
 
 export type ProviderId = "openai" | "codex" | "copilot";
 
@@ -48,4 +49,16 @@ export function openAICompatibleUrl(baseUrl: string, inboundUrl: URL): URL {
 
 export function userAgent(): string {
   return `aimdware-router/${process.env.npm_package_version ?? "0.1.0"}`;
+}
+
+export function fetchWithProxy(
+  fetchImpl: FetchLike,
+  input: string | URL | Request,
+  init: RequestInit = {},
+): Promise<Response> {
+  const target = input instanceof Request ? input.url : input;
+  const proxy = getProxyForUrl(target);
+  const next: RequestInit & { proxy?: string } = { ...init };
+  if (proxy !== undefined) next.proxy = proxy;
+  return fetchImpl(input, next);
 }

@@ -2,6 +2,8 @@ import type { AuthStore, OAuthAuth } from "./auth-store";
 import type { ProviderRuntime } from "./plugin";
 import { openAICompatibleUrl, userAgent } from "./plugin";
 
+const SYNTHETIC_ATTACHMENT_PROMPT = "Attached media from tool result:";
+
 export type CopilotProviderOpts = {
   authStore: AuthStore;
 };
@@ -17,30 +19,73 @@ function base(enterpriseUrl?: string): string {
 }
 
 function isVisionBody(body: ArrayBuffer | undefined): boolean {
-  if (!body) return false;
+  return classifyBody(body).isVision;
+}
+
+function isAgentBody(body: ArrayBuffer | undefined): boolean {
+  return classifyBody(body).isAgent;
+}
+
+function classifyBody(body: ArrayBuffer | undefined): {
+  isVision: boolean;
+  isAgent: boolean;
+} {
+  if (!body) return { isVision: false, isAgent: false };
   try {
     const parsed = JSON.parse(new TextDecoder().decode(body)) as {
-      messages?: Array<{ content?: unknown }>;
-      input?: Array<{ content?: unknown }>;
+      messages?: Array<{ role?: unknown; content?: unknown }>;
+      input?: Array<{ role?: unknown; content?: unknown }>;
     };
-    const messages = parsed.messages ?? parsed.input ?? [];
-    return messages.some((msg) => {
-      const content = msg.content;
+    if (Array.isArray(parsed.input)) {
+      const last = parsed.input.at(-1);
+      return {
+        isVision: parsed.input.some((msg) =>
+          hasContentPart(msg.content, ["input_image"]),
+        ),
+        isAgent: last?.role !== "user" || isSyntheticAttachmentMessage(last),
+      };
+    }
+    if (Array.isArray(parsed.messages)) {
+      const last = parsed.messages.at(-1);
+      return {
+        isVision: parsed.messages.some((msg) =>
+          hasContentPart(msg.content, ["image_url"]),
+        ),
+        isAgent: last?.role !== "user" || isSyntheticAttachmentMessage(last),
+      };
+    }
+  } catch {}
+  return { isVision: false, isAgent: false };
+}
+
+function hasContentPart(content: unknown, types: readonly string[]): boolean {
+  return (
+    Array.isArray(content) &&
+    content.some(
+      (part) =>
+        typeof part === "object" &&
+        part !== null &&
+        types.includes(String((part as { type?: unknown }).type)),
+    )
+  );
+}
+
+function isSyntheticAttachmentMessage(msg: unknown): boolean {
+  if (typeof msg !== "object" || msg === null) return false;
+  const content = (msg as { content?: unknown }).content;
+  if (typeof content === "string")
+    return content === SYNTHETIC_ATTACHMENT_PROMPT;
+  return (
+    Array.isArray(content) &&
+    content.some((part) => {
+      if (typeof part !== "object" || part === null) return false;
+      const typed = part as { type?: unknown; text?: unknown };
       return (
-        Array.isArray(content) &&
-        content.some(
-          (part) =>
-            typeof part === "object" &&
-            part !== null &&
-            ["image_url", "input_image", "image"].includes(
-              String((part as { type?: unknown }).type),
-            ),
-        )
+        (typed.type === "text" || typed.type === "input_text") &&
+        typed.text === SYNTHETIC_ATTACHMENT_PROMPT
       );
-    });
-  } catch {
-    return false;
-  }
+    })
+  );
 }
 
 async function currentAuth(authStore: AuthStore): Promise<OAuthAuth> {
@@ -67,7 +112,7 @@ export function createCopilotProvider(
     headers.set("authorization", `Bearer ${auth.refresh}`);
     headers.set("User-Agent", userAgent());
     headers.set("Openai-Intent", "conversation-edits");
-    headers.set("x-initiator", "user");
+    headers.set("x-initiator", isAgentBody(input.body) ? "agent" : "user");
     if (isVisionBody(input.body)) {
       headers.set("Copilot-Vision-Request", "true");
     }

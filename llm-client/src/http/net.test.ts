@@ -68,9 +68,27 @@ test("NO_PROXY exact host match disables proxy", () => {
   expect(getProxyForUrl("https://api.openai.com")).toBeUndefined();
 });
 
+test("NO_PROXY host:port match disables proxy", () => {
+  process.env.HTTPS_PROXY = "http://corp:8080";
+  process.env.NO_PROXY = "auth.openai.com:443,github.com:443";
+  expect(getProxyForUrl("https://auth.openai.com/oauth/token")).toBeUndefined();
+  expect(
+    getProxyForUrl("https://github.com/login/device/code"),
+  ).toBeUndefined();
+  expect(getProxyForUrl("https://api.openai.com")).toBe("http://corp:8080");
+});
+
 test("NO_PROXY suffix match (.example.com matches sub.example.com)", () => {
   process.env.HTTPS_PROXY = "http://corp:8080";
   process.env.NO_PROXY = ".example.com";
+  expect(getProxyForUrl("https://sub.example.com")).toBeUndefined();
+  expect(getProxyForUrl("https://example.com")).toBeUndefined();
+  expect(getProxyForUrl("https://other.com")).toBe("http://corp:8080");
+});
+
+test("NO_PROXY bare domain also matches subdomains", () => {
+  process.env.HTTPS_PROXY = "http://corp:8080";
+  process.env.NO_PROXY = "example.com";
   expect(getProxyForUrl("https://sub.example.com")).toBeUndefined();
   expect(getProxyForUrl("https://example.com")).toBeUndefined();
   expect(getProxyForUrl("https://other.com")).toBe("http://corp:8080");

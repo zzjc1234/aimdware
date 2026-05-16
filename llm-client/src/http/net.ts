@@ -46,7 +46,7 @@ function isLoopback(host: string): boolean {
 function matchesNoProxy(host: string, noProxy: string): boolean {
   const entries = noProxy
     .split(",")
-    .map((s) => s.trim().toLowerCase())
+    .map((s) => normalizeNoProxyEntry(s.trim().toLowerCase()))
     .filter(Boolean);
   for (const entry of entries) {
     if (entry === "*") return true;
@@ -54,9 +54,16 @@ function matchesNoProxy(host: string, noProxy: string): boolean {
       // ".example.com" matches "sub.example.com" and "example.com"
       const suffix = entry.slice(1);
       if (host === suffix || host.endsWith(entry)) return true;
-    } else if (host === entry) {
+    } else if (host === entry || host.endsWith(`.${entry}`)) {
       return true;
     }
   }
   return false;
+}
+
+function normalizeNoProxyEntry(entry: string): string {
+  if (entry.startsWith("[") && entry.includes("]")) {
+    return entry.slice(1, entry.indexOf("]"));
+  }
+  return entry.replace(/:\d+$/, "");
 }

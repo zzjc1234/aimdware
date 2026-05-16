@@ -1,7 +1,7 @@
 import type { FetchLike } from "../http/proxy";
 import type { AuthStore, OAuthAuth } from "./auth-store";
 import { extractCodexAccountId } from "./codex";
-import { userAgent } from "./plugin";
+import { fetchWithProxy, userAgent } from "./plugin";
 
 const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const CODEX_ISSUER = "https://auth.openai.com";
@@ -36,7 +36,8 @@ function defaults(opts: LoginOpts): Required<LoginOpts> {
 
 export async function loginCodexDevice(opts: LoginOpts): Promise<OAuthAuth> {
   const d = defaults(opts);
-  const deviceResponse = await d.fetchImpl(
+  const deviceResponse = await fetchWithProxy(
+    d.fetchImpl,
     `${CODEX_ISSUER}/api/accounts/deviceauth/usercode`,
     {
       method: "POST",
@@ -63,7 +64,8 @@ export async function loginCodexDevice(opts: LoginOpts): Promise<OAuthAuth> {
   d.notify(`Enter code: ${deviceData.user_code}`);
 
   while (true) {
-    const response = await d.fetchImpl(
+    const response = await fetchWithProxy(
+      d.fetchImpl,
       `${CODEX_ISSUER}/api/accounts/deviceauth/token`,
       {
         method: "POST",
@@ -83,17 +85,21 @@ export async function loginCodexDevice(opts: LoginOpts): Promise<OAuthAuth> {
         authorization_code: string;
         code_verifier: string;
       };
-      const tokenResponse = await d.fetchImpl(`${CODEX_ISSUER}/oauth/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code: code.authorization_code,
-          redirect_uri: `${CODEX_ISSUER}/deviceauth/callback`,
-          client_id: CODEX_CLIENT_ID,
-          code_verifier: code.code_verifier,
-        }).toString(),
-      });
+      const tokenResponse = await fetchWithProxy(
+        d.fetchImpl,
+        `${CODEX_ISSUER}/oauth/token`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: "authorization_code",
+            code: code.authorization_code,
+            redirect_uri: `${CODEX_ISSUER}/deviceauth/callback`,
+            client_id: CODEX_CLIENT_ID,
+            code_verifier: code.code_verifier,
+          }).toString(),
+        },
+      );
       if (!tokenResponse.ok) {
         throw new Error(`Codex token exchange failed: ${tokenResponse.status}`);
       }
@@ -125,7 +131,7 @@ export async function loginCopilotDevice(
     : "github.com";
   const deviceUrl = `https://${domain}/login/device/code`;
   const tokenUrl = `https://${domain}/login/oauth/access_token`;
-  const deviceResponse = await d.fetchImpl(deviceUrl, {
+  const deviceResponse = await fetchWithProxy(d.fetchImpl, deviceUrl, {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -153,7 +159,7 @@ export async function loginCopilotDevice(
   d.notify(`Enter code: ${deviceData.user_code}`);
 
   while (true) {
-    const response = await d.fetchImpl(tokenUrl, {
+    const response = await fetchWithProxy(d.fetchImpl, tokenUrl, {
       method: "POST",
       headers: {
         Accept: "application/json",
