@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -34,9 +34,21 @@ class IngestContextBody(BaseModel):
     session_id: UUID
     turn_count: int = Field(ge=1, default=1)
     course_code: str
-    assignment: str  # free-form, course-scoped; TT decides the namespace
-    blob_hash: str  # hex-encoded sha256
-    blob_uri: str
+    # Free-form course-scoped label. Stricter than blob_uri's path component
+    # because we use it for filtering / display, not for path composition.
+    assignment: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.\-]+$")
+    # Hex-encoded sha256 — 64 chars, [0-9a-fA-F] only. Rejecting non-hex /
+    # wrong-length here means a buggy router gets 422 (fatal, not retryable)
+    # instead of an infinite 500 retry loop.
+    blob_hash: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+    # Path under the WebDAV endpoint. We enforce the canonical shape
+    # `aimdware/<course>/<assignment>/<session>.json` so a malicious router
+    # can't smuggle `..` / absolute URLs / weird chars that the admin
+    # payload-fetch path would later happily resolve.
+    blob_uri: str = Field(
+        pattern=r"^aimdware/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+/"
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.json$",
+    )
     blob_size: int = Field(ge=0)
     # Model + token counts are best-effort metadata. The router does not
     # parse the captured response, so these are optional and may be empty
@@ -47,6 +59,19 @@ class IngestContextBody(BaseModel):
     ts: datetime
     router_version: str
     client_meta: dict[str, Any] = Field(default_factory=dict)
+
+
+def _ts_equal(a: datetime, b: datetime) -> bool:
+    """Compare two datetimes robustly across tz-naive (SQLite stores
+    naive UTC) and tz-aware (Pydantic parses ISO strings to tz-aware UTC).
+    Both sides are normalised to naive UTC for the comparison."""
+    if a is None or b is None:
+        return a is b
+    if a.tzinfo is not None:
+        a = a.astimezone(UTC).replace(tzinfo=None)
+    if b.tzinfo is not None:
+        b = b.astimezone(UTC).replace(tzinfo=None)
+    return a == b
 
 
 def _resolve_enrolled_course(session: Session, user: User, course_code: str) -> Course:
@@ -83,22 +108,45 @@ def post_context(
     matching id with different body returns 409; a fresh insert returns 202.
     """
     course = _resolve_enrolled_course(session, user, body.course_code)
+    expected_blob_uri = f"aimdware/{body.course_code}/{body.assignment}/{body.session_id}.json"
+    if body.blob_uri != expected_blob_uri:
+        raise HTTPException(
+            status_code=422,
+            detail="blob_uri must match course_code, assignment, and session_id",
+        )
 
     digest = bytes.fromhex(body.blob_hash)
     existing = session.get(ContextRecord, body.record_id)
     if existing is not None:
-        same = (
-            existing.blob_hash == digest
-            and existing.blob_uri == body.blob_uri
-            and existing.blob_size == body.blob_size
-            and existing.user_id == user.id
-            and existing.course_id == course.id
-            and existing.assignment == body.assignment
-        )
-        if not same:
+        # Two-phase compare so the diagnostic message can name the
+        # mismatching field. The mandatory fields are everything that
+        # would make the existing row semantically different from the
+        # incoming replay; we deliberately do NOT compare `client_meta`,
+        # `prompt_tokens`, `completion_tokens` which can legitimately drift.
+        mismatches = [
+            name
+            for name, ok in (
+                ("blob_hash", existing.blob_hash == digest),
+                ("blob_uri", existing.blob_uri == body.blob_uri),
+                ("blob_size", existing.blob_size == body.blob_size),
+                ("user_id", existing.user_id == user.id),
+                ("course_id", existing.course_id == course.id),
+                ("assignment", existing.assignment == body.assignment),
+                ("session_id", existing.session_id == body.session_id),
+                ("turn_count", existing.turn_count == body.turn_count),
+                ("ts", _ts_equal(existing.ts, body.ts)),
+                ("model", existing.model == body.model),
+                ("router_version", existing.router_version == body.router_version),
+            )
+            if not ok
+        ]
+        if mismatches:
             raise HTTPException(
                 status_code=409,
-                detail="record_id matches existing row with different content",
+                detail=(
+                    "record_id matches existing row but these fields differ: "
+                    + ", ".join(mismatches)
+                ),
             )
         response.status_code = status.HTTP_200_OK
         return {"id": str(existing.id), "status": "exists"}

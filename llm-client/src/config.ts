@@ -1,6 +1,12 @@
 import YAML from "yaml";
 import { z } from "zod";
 
+const SlugSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9_.-]+$/, "must contain only A-Z, a-z, 0-9, _, ., or -");
+
 const UpstreamSchema = z.object({
   type: z.enum(["openai", "codex", "copilot"]).default("openai"),
   base_url: z.string().default("https://api.openai.com"),
@@ -9,8 +15,8 @@ const UpstreamSchema = z.object({
 
 const RawConfigSchema = z.object({
   student_token: z.string().min(1, "student_token is required"),
-  course: z.string().min(1, "course is required"),
-  assignment: z.string().min(1, "assignment is required"),
+  course: SlugSchema,
+  assignment: SlugSchema,
   upstream: UpstreamSchema,
   port: z.number().int().positive().default(12345),
   local_cache_dir: z.string().default("~/.cache/aimdware"),
@@ -28,10 +34,15 @@ export type Config = z.infer<typeof RawConfigSchema> & {
 export function loadConfig(yamlText: string): Config {
   const raw = YAML.parse(yamlText);
   const parsed = RawConfigSchema.parse(raw);
+  const canonicalJboxPath = `aimdware/${parsed.course}/${parsed.assignment}`;
+  if (
+    parsed.jbox_remote_path !== undefined &&
+    parsed.jbox_remote_path !== canonicalJboxPath
+  ) {
+    throw new Error(`jbox_remote_path must be ${canonicalJboxPath}`);
+  }
   return {
     ...parsed,
-    jbox_remote_path:
-      parsed.jbox_remote_path ??
-      `aimdware/${parsed.course}/${parsed.assignment}`,
+    jbox_remote_path: parsed.jbox_remote_path ?? canonicalJboxPath,
   };
 }

@@ -47,14 +47,15 @@ def enrolled_student(session: Session) -> tuple[str, User, Course]:
 
 
 def _body(course_code: str = "ECE4721J", **overrides) -> dict:
+    sess = str(uuid4())
     base = {
         "record_id": str(uuid4()),
-        "session_id": str(uuid4()),
+        "session_id": sess,
         "turn_count": 1,
         "course_code": course_code,
         "assignment": "hw1",
         "blob_hash": "ab" * 32,
-        "blob_uri": "aimdware/ECE4721J/hw1/abc.json",
+        "blob_uri": f"aimdware/{course_code}/hw1/{sess}.json",
         "blob_size": 1234,
         "model": "gpt-4o-mini",
         "prompt_tokens": 10,
@@ -241,12 +242,107 @@ def test_post_context_duplicate_session_turn_returns_409(
 
     body1 = _body()
     body1["session_id"] = sess
+    body1["blob_uri"] = f"aimdware/ECE4721J/hw1/{sess}.json"
     body1["turn_count"] = 1
     r1 = client.post("/ingest/context", json=body1, headers=h)
     assert r1.status_code == 202, r1.text
 
     body2 = _body()  # new record_id, same session/turn
     body2["session_id"] = sess
+    body2["blob_uri"] = f"aimdware/ECE4721J/hw1/{sess}.json"
     body2["turn_count"] = 1
     r2 = client.post("/ingest/context", json=body2, headers=h)
     assert r2.status_code == 409, r2.text
+
+
+# --------- new validation regression tests ---------
+
+
+def test_blob_hash_must_be_64_hex(
+    client: TestClient, enrolled_student: tuple[str, User, Course]
+) -> None:
+    """Wrong-length hex used to be silently accepted (then audit
+    forever-fails). Non-hex used to crash to 500 (then router
+    retried forever). Both must now be 422."""
+    plaintext, _, _ = enrolled_student
+    h = {"Authorization": f"Bearer {plaintext}"}
+
+    short = _body()
+    short["blob_hash"] = "ab" * 30  # 60 hex chars
+    assert client.post("/ingest/context", json=short, headers=h).status_code == 422
+
+    nonhex = _body()
+    nonhex["blob_hash"] = "X" * 64
+    assert client.post("/ingest/context", json=nonhex, headers=h).status_code == 422
+
+
+def test_blob_uri_must_match_canonical_shape(
+    client: TestClient, enrolled_student: tuple[str, User, Course]
+) -> None:
+    """Path traversal / absolute URLs / weird chars used to slip
+    through ingest, then admin payload-fetch happily resolved them."""
+    plaintext, _, _ = enrolled_student
+    h = {"Authorization": f"Bearer {plaintext}"}
+
+    bad_paths = [
+        "aimdware/../private/x.json",  # traversal
+        "https://attacker.example/payload.json",  # absolute URL
+        "aimdware/ECE4721J/hw1/not-a-uuid.json",  # bad filename
+        "aimdware/ECE4721J/hw1/00000000-0000-0000-0000-000000000000.txt",  # wrong ext
+        "../../etc/passwd",  # blatant traversal
+    ]
+    for bad in bad_paths:
+        body = _body()
+        body["blob_uri"] = bad
+        r = client.post("/ingest/context", json=body, headers=h)
+        assert r.status_code == 422, f"blob_uri={bad!r} should be rejected, got {r.status_code}"
+
+
+def test_blob_uri_must_match_body_course_assignment_and_session(
+    client: TestClient, enrolled_student: tuple[str, User, Course]
+) -> None:
+    """A well-shaped path is still invalid if it points at a different
+    course / assignment / session than the trusted request fields."""
+    plaintext, _, _ = enrolled_student
+    h = {"Authorization": f"Bearer {plaintext}"}
+    body = _body()
+    other_session = uuid4()
+
+    bad_paths = [
+        f"aimdware/OTHER/hw1/{body['session_id']}.json",
+        f"aimdware/ECE4721J/hw2/{body['session_id']}.json",
+        f"aimdware/ECE4721J/hw1/{other_session}.json",
+    ]
+    for bad in bad_paths:
+        candidate = dict(body)
+        candidate["blob_uri"] = bad
+        r = client.post("/ingest/context", json=candidate, headers=h)
+        assert r.status_code == 422, f"blob_uri={bad!r} should be bound to body fields"
+
+
+def test_idempotent_compare_rejects_mismatched_metadata(
+    client: TestClient, enrolled_student: tuple[str, User, Course]
+) -> None:
+    """Replay with same record_id but different audit-relevant metadata
+    must 409, naming the mismatched fields."""
+    plaintext, _, _ = enrolled_student
+    h = {"Authorization": f"Bearer {plaintext}"}
+    body = _body()
+    assert client.post("/ingest/context", json=body, headers=h).status_code == 202
+
+    # Try replaying with the SAME record_id but a different session_id —
+    # this was previously silently accepted (200).
+    replay = dict(body)
+    replay_session = str(uuid4())
+    replay["session_id"] = replay_session
+    replay["blob_uri"] = f"aimdware/ECE4721J/hw1/{replay_session}.json"
+    r = client.post("/ingest/context", json=replay, headers=h)
+    assert r.status_code == 409
+    assert "session_id" in r.json()["detail"]
+
+    # And same with turn_count.
+    replay2 = dict(body)
+    replay2["turn_count"] = 7
+    r = client.post("/ingest/context", json=replay2, headers=h)
+    assert r.status_code == 409
+    assert "turn_count" in r.json()["detail"]

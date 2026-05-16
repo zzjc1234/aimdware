@@ -1,5 +1,11 @@
 import { test, expect, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
@@ -73,7 +79,7 @@ afterEach(() => {
 });
 
 const NOW = 100_000_000;
-const TTL = 7 * 24 * 3600 * 1000;
+const TTL = 24 * 3600 * 1000;
 
 test("evicts a single-turn session past TTL: deletes <session_id>.json + marks record", async () => {
   const { cacheDir, recordsDir, q } = fresh();
@@ -130,6 +136,29 @@ test("does NOT evict a session that still has in-flight turns", async () => {
   q.close();
 });
 
+test("evicts terminal failure sessions past TTL", async () => {
+  const { cacheDir, recordsDir, q } = fresh();
+  q.enqueue(body("r1", "S-terminal", 1), 0);
+  q.markTerminal("r1", "fatal", "schema bug");
+  backdate(cacheDir, "r1", NOW - TTL - 2000);
+  q.enqueue(body("r2", "S-terminal", 2), 0);
+  q.markTerminal("r2", "conflict", "body mismatch");
+  backdate(cacheDir, "r2", NOW - TTL - 1000);
+  writeFileSync(join(recordsDir, "S-terminal.json"), "payload");
+
+  const summary = await runEvictionOnce({
+    queue: q,
+    cacheDir,
+    now: () => NOW,
+    ttlMs: TTL,
+  });
+  expect(summary.sessions_evicted).toBe(1);
+  expect(existsSync(join(recordsDir, "S-terminal.json"))).toBe(false);
+  expect(q.isEvicted("r1")).toBe(true);
+  expect(q.isEvicted("r2")).toBe(true);
+  q.close();
+});
+
 test("does NOT evict when the latest turn is still within TTL", async () => {
   const { cacheDir, recordsDir, q } = fresh();
   setupDoneTurn(q, cacheDir, recordsDir, "r1", "S-fresh", 1, NOW - 5_000);
@@ -180,6 +209,42 @@ test("tolerates a missing file (already removed out-of-band) — still marks rec
   expect(summary.sessions_evicted).toBe(1);
   expect(q.isEvicted("r1")).toBe(true);
   q.close();
+});
+
+test("does NOT mark evicted when unlink fails", async () => {
+  const { cacheDir, recordsDir, q } = fresh();
+  setupDoneTurn(
+    q,
+    cacheDir,
+    recordsDir,
+    "r1",
+    "S-blocked",
+    1,
+    NOW - TTL - 1000,
+  );
+  rmSync(join(recordsDir, "S-blocked.json"));
+  mkdirSync(join(recordsDir, "S-blocked.json"));
+
+  const warnings: string[] = [];
+  const origWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(" "));
+  try {
+    const summary = await runEvictionOnce({
+      queue: q,
+      cacheDir,
+      now: () => NOW,
+      ttlMs: TTL,
+    });
+    expect(summary.sessions_evicted).toBe(0);
+    expect(summary.records_marked).toBe(0);
+    expect(q.isEvicted("r1")).toBe(false);
+    expect(warnings.join("\n")).toContain(
+      "unlink failed for session S-blocked",
+    );
+  } finally {
+    console.warn = origWarn;
+    q.close();
+  }
 });
 
 test("limit caps the number of sessions per pass", async () => {

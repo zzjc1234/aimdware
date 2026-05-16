@@ -3,7 +3,7 @@ import { proxyChat, type FetchLike, type UpstreamConfig } from "./proxy";
 
 export type HandlerOpts = {
   upstream: UpstreamConfig;
-  onCapture?: (result: CaptureResult) => void;
+  onCapture?: (result: CaptureResult) => void | Promise<void>;
   fetchImpl?: FetchLike;
 };
 
@@ -43,8 +43,17 @@ async function handleChat(req: Request, opts: HandlerOpts): Promise<Response> {
   const { clientResponse, captureP } = captureChat(requestBytes, upstreamRes);
 
   captureP.then(
-    (result) => {
-      opts.onCapture?.(result);
+    async (result) => {
+      // onCapture is the integration point that writes to the local
+      // outbox + cache. If anything in there throws (sqlite locked, disk
+      // full, queue.db corrupt), we MUST log it — otherwise the record
+      // silently disappears from the audit trail (client already saw
+      // the response and is happy).
+      try {
+        await opts.onCapture?.(result);
+      } catch (err) {
+        console.error("onCapture failed:", err);
+      }
     },
     (err) => {
       console.error("capture failed:", err);

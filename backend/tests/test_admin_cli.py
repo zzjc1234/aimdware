@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 
-from sqlmodel import Session, select
+import pytest
+from sqlmodel import Session, SQLModel, create_engine, select
 
+from aimdware_backend import settings
 from aimdware_backend.admin_cli import (
+    _schema_exists,
     course_create,
     enroll,
     token_issue,
@@ -92,3 +95,39 @@ def test_token_revoke_by_prefix(session: Session) -> None:
 
 def test_token_revoke_no_match_returns_zero(session: Session) -> None:
     assert token_revoke(session, prefix="missing!") == 0
+
+
+def test_main_refuses_when_schema_missing(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    """CLI must NOT silently create tables. On an empty DB it should
+    exit with a clear message pointing the operator at Alembic."""
+    import os
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = f.name
+    from aimdware_backend import db as _db
+
+    previous_engine = _db._engine  # noqa: SLF001 - test must isolate process-wide engine
+    try:
+        monkeypatch.setattr(settings.settings, "database_url", f"sqlite:///{db_path}")
+        _db._engine = None  # noqa: SLF001 - reset process-wide engine for this CLI test
+        from aimdware_backend.admin_cli import main as cli_main
+
+        rc = cli_main(["user", "list"])
+        assert rc == 2
+        captured = capsys.readouterr()
+        assert "alembic upgrade head" in captured.err
+    finally:
+        created_engine = _db._engine  # noqa: SLF001 - close temporary test engine before unlink
+        if created_engine is not None and created_engine is not previous_engine:
+            created_engine.dispose()
+        _db._engine = previous_engine  # noqa: SLF001 - restore shared engine after CLI test
+        os.unlink(db_path)
+
+
+def test_schema_probe_rejects_legacy_create_all_schema() -> None:
+    """A metadata.create_all DB has core tables but is not an Alembic-owned
+    production schema, so the CLI must refuse it."""
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    assert _schema_exists(engine) is False

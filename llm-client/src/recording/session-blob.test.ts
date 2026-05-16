@@ -47,7 +47,7 @@ test("router metadata is at blob root; the whole parsed request lives under `req
 test("ANY field on the request body is preserved verbatim (future-proof)", () => {
   // Throw a kitchen sink at the router and verify nothing got dropped.
   // Includes fields that don't exist today but might tomorrow.
-  const reqText = JSON.stringify({
+  const futureRequestText = JSON.stringify({
     model: "x",
     messages: [{ role: "user", content: "hi" }],
     temperature: 0.7,
@@ -72,7 +72,7 @@ test("ANY field on the request body is preserved verbatim (future-proof)", () =>
     turn_count: 1,
     upstream_type: "openai",
     upstream_status: 200,
-    request_bytes: enc(reqText),
+    request_bytes: enc(futureRequestText),
     response_bytes: enc("{}"),
   });
   const obj = JSON.parse(dec(r.blob_bytes));
@@ -90,7 +90,7 @@ test("ANY field on the request body is preserved verbatim (future-proof)", () =>
 });
 
 test("tools + tool_choice round-trip through `request`", () => {
-  const reqText = JSON.stringify({
+  const toolRequestText = JSON.stringify({
     model: "x",
     messages: [{ role: "user", content: "list files" }],
     tools: [
@@ -116,7 +116,7 @@ test("tools + tool_choice round-trip through `request`", () => {
     turn_count: 1,
     upstream_type: "openai",
     upstream_status: 200,
-    request_bytes: enc(reqText),
+    request_bytes: enc(toolRequestText),
     response_bytes: enc("{}"),
   });
   const obj = JSON.parse(dec(r.blob_bytes));

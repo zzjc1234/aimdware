@@ -156,3 +156,52 @@ test("/v1/chat/completions streams response while still capturing", async () => 
     chunks.join(""),
   );
 });
+
+test("onCapture throwing is caught and logged, request still completes", async () => {
+  const { baseUrl } = startFakeUpstream(
+    () =>
+      new Response('{"id":"x"}', {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+  );
+
+  const errors: string[] = [];
+  const origError = console.error;
+  let resolveLogged!: () => void;
+  const logged = new Promise<void>((resolve) => {
+    resolveLogged = resolve;
+  });
+  console.error = (...args) => {
+    errors.push(args.join(" "));
+    if (args.join(" ").includes("onCapture failed")) resolveLogged();
+  };
+
+  try {
+    const handler = createHandler({
+      upstream: { base_url: baseUrl, api_key: "k" },
+      onCapture: async () => {
+        throw new Error("simulated outbox-write failure");
+      },
+    });
+    const res = await handler(
+      new Request("http://localhost/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: '{"model":"gpt-4o","messages":[]}',
+      }),
+    );
+    expect(res.status).toBe(200); // client-side success unaffected
+
+    await Promise.race([
+      logged,
+      Bun.sleep(1000).then(() => {
+        throw new Error("timed out waiting for onCapture error log");
+      }),
+    ]);
+    expect(errors.join("\n")).toContain("onCapture failed");
+    expect(errors.join("\n")).toContain("simulated outbox-write failure");
+  } finally {
+    console.error = origError;
+  }
+});

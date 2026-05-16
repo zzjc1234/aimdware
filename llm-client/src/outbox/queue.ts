@@ -238,8 +238,8 @@ export class IngestQueue {
    * Return sessions whose on-disk cache file is safe to delete. A session
    * is evictable when:
    *
-   *   - every record in the session has state='done' (no in-flight turns
-   *     that still need to read the file)
+   *   - every record in the session is terminal: done, conflict, or fatal
+   *     (no in-flight turns that still need to read the file)
    *   - at least one record still has cache_evicted=0 (otherwise this
    *     session has already been processed)
    *   - MAX(created_at) across the session's records is older than the
@@ -260,7 +260,7 @@ export class IngestQueue {
          FROM outbox
          WHERE session_id IS NOT NULL
          GROUP BY session_id
-         HAVING SUM(CASE WHEN state = 'done' THEN 0 ELSE 1 END) = 0
+         HAVING SUM(CASE WHEN state IN ('done', 'conflict', 'fatal') THEN 0 ELSE 1 END) = 0
             AND SUM(CASE WHEN cache_evicted = 0 THEN 1 ELSE 0 END) > 0
             AND MAX(created_at) < ?
          ORDER BY MAX(created_at) ASC

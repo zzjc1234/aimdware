@@ -53,7 +53,7 @@ function body(
     course_code: "X",
     assignment: "hw1",
     blob_hash: "abc",
-    blob_uri: `aimdware/X/${session_id}.json`,
+    blob_uri: `aimdware/X/hw1/${session_id}.json`,
     blob_size: 0,
     ts: new Date(0).toISOString(),
     router_version: "0.0.0",
@@ -71,7 +71,7 @@ test("sync stage reads <session_id>.json (NOT <record_id>.json) and PUTs those b
 
   expect(result).toEqual({ kind: "advance" });
   expect(uploads).toHaveLength(1);
-  expect(uploads[0]!.path).toBe("/aimdware/X/S1.json");
+  expect(uploads[0]!.path).toBe("/aimdware/X/hw1/S1.json");
   expect(new TextDecoder().decode(uploads[0]!.bytes)).toBe("turn-1-blob");
 });
 
@@ -99,7 +99,7 @@ test("sync stage uploads WHATEVER is currently on disk — a later turn's overwr
 
   // BOTH PUTs went to the same session-keyed jbox path.
   expect(uploads[0]!.path).toBe(uploads[1]!.path);
-  expect(uploads[0]!.path).toBe("/aimdware/X/S-race.json");
+  expect(uploads[0]!.path).toBe("/aimdware/X/hw1/S-race.json");
 });
 
 test("sync stage in parallel: 3 PUTs for one session all carry the latest disk bytes", async () => {

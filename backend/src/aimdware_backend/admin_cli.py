@@ -25,7 +25,8 @@ import sys
 from typing import Any
 from uuid import UUID
 
-from sqlmodel import Session, SQLModel, select
+from sqlalchemy import text
+from sqlmodel import Session, select
 
 from aimdware_backend.db import get_engine
 from aimdware_backend.models import (
@@ -380,13 +381,47 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     engine = get_engine()
-    SQLModel.metadata.create_all(engine)
+    # Do NOT call SQLModel.metadata.create_all() — production schema is
+    # owned by Alembic, and create_all() can't express the partial unique
+    # index that enforces "one active token per user". If we silently
+    # create tables here, a later `alembic upgrade head` would fail with
+    # "table already exists". Refuse early with a clear message instead.
+    if not _schema_exists(engine):
+        print(
+            "error: database schema is missing or incomplete.\n"
+            "       run  `uv run alembic upgrade head`  first.",
+            file=sys.stderr,
+        )
+        return 2
+
     with Session(engine) as session:
         if inspect.iscoroutinefunction(args.func):
             asyncio.run(args.func(session, args))
         else:
             args.func(session, args)
     return 0
+
+
+CURRENT_SCHEMA_REVISION = "b984da6ac5c5"
+
+
+def _schema_exists(engine) -> bool:  # type: ignore[no-untyped-def]
+    """Probe for an Alembic-owned schema at the revision this CLI expects."""
+    from sqlalchemy import inspect as sa_inspect
+
+    try:
+        insp = sa_inspect(engine)
+        if not (
+            insp.has_table("context_records")
+            and insp.has_table("users")
+            and insp.has_table("alembic_version")
+        ):
+            return False
+        with engine.connect() as conn:
+            version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        return version == CURRENT_SCHEMA_REVISION
+    except Exception:
+        return False
 
 
 if __name__ == "__main__":

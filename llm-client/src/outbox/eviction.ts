@@ -16,7 +16,7 @@ export type EvictionSummary = {
   records_marked: number;
 };
 
-const DEFAULT_TTL_MS = 7 * 24 * 3600 * 1000;
+const DEFAULT_TTL_MS = 24 * 3600 * 1000;
 const DEFAULT_LIMIT = 500;
 
 /**
@@ -24,7 +24,7 @@ const DEFAULT_LIMIT = 500;
  *
  * The local cache file is keyed by `session_id` (shared across every
  * turn of an agent run), so eviction operates session-by-session, not
- * record-by-record. For each settled session past TTL: unlink
+ * record-by-record. For each terminal session past TTL: unlink
  * `records/<session_id>.json` once and mark every constituent record
  * `cache_evicted = 1`. ENOENT is tolerated (the file may have been
  * cleared out-of-band).
@@ -41,23 +41,28 @@ export async function runEvictionOnce(
   const threshold = now - ttlMs;
 
   const sessions = opts.queue.findEvictableSessions(threshold, limit);
+  let sessions_evicted = 0;
   let records_marked = 0;
   for (const s of sessions) {
+    let canMarkEvicted = true;
     try {
       await unlink(sessionBlobPath(opts.cacheDir, s.session_id));
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       if (code !== "ENOENT") {
+        canMarkEvicted = false;
         console.warn(
           `unlink failed for session ${s.session_id}:`,
           (e as Error).message,
         );
       }
     }
+    if (!canMarkEvicted) continue;
     for (const rid of s.record_ids) opts.queue.markEvicted(rid);
+    sessions_evicted += 1;
     records_marked += s.record_ids.length;
   }
-  return { sessions_evicted: sessions.length, records_marked };
+  return { sessions_evicted, records_marked };
 }
 
 export type EvictionLoopHandle = { stop: () => Promise<void> };

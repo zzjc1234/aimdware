@@ -118,8 +118,8 @@ No relational integrity to enforce.
 
 ### Why `assignment` is a string, not a FK
 
-Assignments are TT-decreed free-form labels (homework slug, lab number,
-exam name). Modelling them as entities would force admin overhead
+Assignments are TT-decreed slugs (homework slug, lab number, exam name;
+letters, digits, underscore, dot, and hyphen). Modelling them as entities would force admin overhead
 ("create assignment row before students can use it") for no gain — TT
 audit is purely string-equality on this field.
 

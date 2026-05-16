@@ -16,8 +16,8 @@ student_token: REPLACE_ME
 # Course code, must match what the TT enrolled you in.
 course: REPLACE_ME
 
-# Assignment label inside that course. Free-form, but TT-decreed —
-# whatever string the TT told you to use for this hw / lab / exam.
+# Assignment label inside that course. Must be the TT-decreed slug
+# for this hw / lab / exam: A-Z, a-z, 0-9, underscore, dot, or hyphen.
 # Every captured conversation will land under this assignment's folder
 # on jbox, so picking the right one is what lets the TT find your work.
 assignment: REPLACE_ME

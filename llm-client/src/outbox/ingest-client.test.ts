@@ -41,8 +41,8 @@ function sampleBody(): IngestBody {
     turn_count: 1,
     course_code: "ECE4721J",
     assignment: "hw1",
-    blob_hash: "deadbeef",
-    blob_uri: "jbox://zhangsan/aimdware/ECE4721J/x.json",
+    blob_hash: "de".repeat(32),
+    blob_uri: "aimdware/ECE4721J/hw1/22222222-2222-2222-2222-222222222222.json",
     blob_size: 123,
     model: "gpt-4o-mini",
     prompt_tokens: 14,
@@ -62,7 +62,7 @@ test("postContext sends Bearer student token + JSON body to /ingest/context", as
   const sent = JSON.parse(lastReq!.body);
   expect(sent.record_id).toBe("11111111-1111-1111-1111-111111111111");
   expect(sent.course_code).toBe("ECE4721J");
-  expect(sent.blob_hash).toBe("deadbeef");
+  expect(sent.blob_hash).toBe("de".repeat(32));
 });
 
 test("202 -> created", async () => {

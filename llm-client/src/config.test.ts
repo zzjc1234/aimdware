@@ -63,6 +63,37 @@ test("loadConfig rejects missing required fields", () => {
   }
 });
 
+test("loadConfig rejects course and assignment values the backend would reject", () => {
+  const cases: Array<[string, string]> = [
+    ["course with slash", "course: ECE/4721J\nassignment: hw1"],
+    ["assignment with space", "course: ECE4721J\nassignment: hw 1"],
+    ["assignment with non-ascii", "course: ECE4721J\nassignment: 作业1"],
+  ];
+  for (const [label, fields] of cases) {
+    const yaml = `
+student_token: st_x
+${fields}
+upstream:
+  api_key: sk-x
+backend_url: https://b.example
+`;
+    expect(() => loadConfig(yaml), label).toThrow();
+  }
+});
+
+test("loadConfig rejects jbox_remote_path that disagrees with course and assignment", () => {
+  const yaml = `
+student_token: st_x
+course: ECE4721J
+assignment: hw1
+jbox_remote_path: aimdware/OTHER/hw2
+upstream:
+  api_key: sk-x
+backend_url: https://b.example
+`;
+  expect(() => loadConfig(yaml)).toThrow();
+});
+
 test("loadConfig defaults upstream.type to 'openai'", () => {
   const yaml = `
 student_token: st_x

@@ -16,8 +16,8 @@ all off the student's critical path:
 
 ```yaml
 student_token: st_... # one per student; TT hands it directly
-course: ECE4721J # course code; sent with every ingest call
-assignment: hw1 # free-form label within the course; same payload-path level
+course: ECE4721J # course code slug; sent with every ingest call
+assignment: hw1 # TT-decreed slug; A-Z/a-z/0-9/_.-
 upstream:
   type: openai # default; only openai supported in v1
   base_url: https://models.sjtu.edu.cn/api/v1
@@ -29,7 +29,7 @@ backend_url: https://aimdware.example.edu
 tbox_url: http://127.0.0.1:50471
 tbox_user: alice
 tbox_pass: <password or app token>
-# Optional: full override. Default = aimdware/<course>/<assignment>
+# Optional: must match the canonical default = aimdware/<course>/<assignment>
 # jbox_remote_path: aimdware/ECE4721J/hw1
 ```
 
@@ -174,9 +174,10 @@ router processes too.
 ## Eviction
 
 Session-keyed blob cache is reclaimable when **every** record sharing
-that `session_id` has reached `state = done` AND the latest of them
-was created more than `ttlMs` ago (default 7 days). One delete per
-session; all member records get `cache_evicted = 1`.
+that `session_id` has reached a terminal state (`done`, `conflict`, or
+`fatal`) AND the latest of them was created more than `ttlMs` ago
+(default 24 hours). One delete per session; all member records get
+`cache_evicted = 1`.
 
 The queue row itself never deletes — it remains a per-record audit
 trail on the student's disk.
