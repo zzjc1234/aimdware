@@ -1,6 +1,14 @@
 import { captureChat, type CaptureResult } from "../recording/capture";
-import { proxyChat, type FetchLike, type UpstreamConfig } from "./proxy";
-import type { ProviderRuntime } from "../providers/plugin";
+import {
+  proxyChat,
+  proxyResponses,
+  type FetchLike,
+  type UpstreamConfig,
+} from "./proxy";
+import {
+  UnsupportedProviderProtocolError,
+  type ProviderRuntime,
+} from "../providers/plugin";
 
 export type HandlerOpts = {
   upstream: UpstreamConfig | ProviderRuntime;
@@ -19,17 +27,57 @@ export function createHandler(opts: HandlerOpts): RequestHandler {
     }
 
     if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
-      return handleChat(req, opts);
+      return handleProviderErrors(() => handleChat(req, opts));
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/responses") {
+      return handleProviderErrors(() => handleResponses(req, opts));
     }
 
     return new Response("not found", { status: 404 });
   };
 }
 
+async function handleProviderErrors(
+  fn: () => Promise<Response>,
+): Promise<Response> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof UnsupportedProviderProtocolError) {
+      return new Response(e.message, { status: 400 });
+    }
+    throw e;
+  }
+}
+
 async function handleChat(req: Request, opts: HandlerOpts): Promise<Response> {
+  return handleCaptured(req, opts, (proxyReq) =>
+    proxyChat(proxyReq, opts.upstream, {
+      fetchImpl: opts.fetchImpl,
+    }),
+  );
+}
+
+async function handleResponses(
+  req: Request,
+  opts: HandlerOpts,
+): Promise<Response> {
+  return handleCaptured(req, opts, (proxyReq) =>
+    proxyResponses(proxyReq, opts.upstream, {
+      fetchImpl: opts.fetchImpl,
+    }),
+  );
+}
+
+async function handleCaptured(
+  req: Request,
+  opts: HandlerOpts,
+  proxy: (req: Request) => Promise<Response>,
+): Promise<Response> {
   const requestBytes = new Uint8Array(await req.arrayBuffer());
 
-  // proxyChat reads from a Request; rebuild one carrying the body we just
+  // The proxy reads from a Request; rebuild one carrying the body we just
   // captured so capture and proxy each have their own bytes.
   const proxyReq = new Request(req.url, {
     method: req.method,
@@ -37,9 +85,7 @@ async function handleChat(req: Request, opts: HandlerOpts): Promise<Response> {
     body: requestBytes,
   });
 
-  const upstreamRes = await proxyChat(proxyReq, opts.upstream, {
-    fetchImpl: opts.fetchImpl,
-  });
+  const upstreamRes = await proxy(proxyReq);
 
   const { clientResponse, captureP } = captureChat(requestBytes, upstreamRes);
 

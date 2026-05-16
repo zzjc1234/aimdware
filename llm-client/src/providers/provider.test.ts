@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { proxyChat, type FetchLike } from "../http/proxy";
+import { proxyChat, proxyResponses, type FetchLike } from "../http/proxy";
 import { createCodexProvider } from "./codex";
 import { createCopilotProvider } from "./copilot";
 import type { AuthStore, ProviderAuth } from "./auth-store";
@@ -17,7 +17,7 @@ function authStore(initial: ProviderAuth): AuthStore {
   };
 }
 
-test("codex provider refreshes oauth and rewrites chat requests to the Codex endpoint", async () => {
+test("codex provider refreshes oauth and rewrites Responses requests to the Codex endpoint", async () => {
   const store = authStore({
     type: "oauth",
     access: "expired-access",
@@ -49,11 +49,11 @@ test("codex provider refreshes oauth and rewrites chat requests to the Codex end
     return new Response('{"ok":true}', { status: 200 });
   };
 
-  await proxyChat(
-    new Request("http://router-local/v1/chat/completions", {
+  await proxyResponses(
+    new Request("http://router-local/v1/responses", {
       method: "POST",
       headers: { authorization: "Bearer client-token" },
-      body: JSON.stringify({ model: "gpt-5.3-codex", messages: [] }),
+      body: JSON.stringify({ model: "gpt-5.3-codex", input: [] }),
     }),
     createCodexProvider({ authStore: store, fetchImpl: refreshFetch }),
     { fetchImpl: upstreamFetch },
@@ -65,6 +65,25 @@ test("codex provider refreshes oauth and rewrites chat requests to the Codex end
   );
   expect(upstreamCalls[0]!.headers.authorization).toBe("Bearer fresh-access");
   expect(upstreamCalls[0]!.headers["chatgpt-account-id"]).toBe("acct-old");
+});
+
+test("codex provider rejects Chat Completions instead of sending the wrong protocol upstream", async () => {
+  const store = authStore({
+    type: "oauth",
+    access: "access-token",
+    refresh: "refresh-token",
+    expires: Date.now() + 60_000,
+  });
+
+  await expect(
+    proxyChat(
+      new Request("http://router-local/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "gpt-5.3-codex", messages: [] }),
+      }),
+      createCodexProvider({ authStore: store }),
+    ),
+  ).rejects.toThrow("does not support /v1/chat/completions");
 });
 
 test("copilot provider targets GitHub Copilot and adds subscription headers", async () => {

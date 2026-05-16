@@ -1,6 +1,6 @@
 import { test, expect, afterEach, beforeEach } from "bun:test";
 import type { Server } from "bun";
-import { proxyChat, type FetchLike } from "./proxy";
+import { proxyChat, proxyResponses, type FetchLike } from "./proxy";
 
 beforeEach(() => {
   delete process.env.HTTP_PROXY;
@@ -240,4 +240,35 @@ test("proxyChat does not double-prefix /v1 when base_url already ends with /v1",
   expect(dedupeCalls[0]!.url).toBe(
     "https://api.openai.com/v1/chat/completions",
   );
+});
+
+test("proxyResponses forwards Responses API requests to OpenAI-compatible upstreams", async () => {
+  const { baseUrl } = await startFakeUpstream(
+    () =>
+      new Response('{"id":"resp_x"}', {
+        headers: { "content-type": "application/json" },
+      }),
+  );
+
+  await proxyResponses(
+    new Request("http://localhost/v1/responses", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer router-side-junk",
+      },
+      body: JSON.stringify({
+        model: "gpt-5",
+        input: [{ role: "user", content: "hi" }],
+      }),
+    }),
+    { base_url: baseUrl, api_key: "sk-upstream" },
+  );
+
+  expect(recorded).toHaveLength(1);
+  expect(recorded[0]!.url).toBe(`${baseUrl}/v1/responses`);
+  expect(recorded[0]!.headers.authorization).toBe("Bearer sk-upstream");
+  const fwd = JSON.parse(recorded[0]!.body);
+  expect(fwd.model).toBe("gpt-5");
+  expect(fwd.input[0].content).toBe("hi");
 });

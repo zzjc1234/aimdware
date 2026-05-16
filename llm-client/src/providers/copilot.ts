@@ -56,32 +56,37 @@ async function currentAuth(authStore: AuthStore): Promise<OAuthAuth> {
 export function createCopilotProvider(
   opts: CopilotProviderOpts,
 ): ProviderRuntime {
+  const prepare = async (
+    input: Parameters<ProviderRuntime["prepareChat"]>[0],
+  ) => {
+    const auth = await currentAuth(opts.authStore);
+    const headers = new Headers(input.headers);
+    headers.delete("authorization");
+    headers.delete("Authorization");
+    headers.delete("x-api-key");
+    headers.set("authorization", `Bearer ${auth.refresh}`);
+    headers.set("User-Agent", userAgent());
+    headers.set("Openai-Intent", "conversation-edits");
+    headers.set("x-initiator", "user");
+    if (isVisionBody(input.body)) {
+      headers.set("Copilot-Vision-Request", "true");
+    }
+
+    return {
+      url: openAICompatibleUrl(
+        base(auth.enterprise_url ?? auth.enterpriseUrl),
+        input.inboundUrl,
+      ),
+      method: input.method,
+      headers,
+      body: input.body,
+    };
+  };
+
   return {
     id: "copilot",
     label: "GitHub Copilot subscription",
-    async prepareChat(input) {
-      const auth = await currentAuth(opts.authStore);
-      const headers = new Headers(input.headers);
-      headers.delete("authorization");
-      headers.delete("Authorization");
-      headers.delete("x-api-key");
-      headers.set("authorization", `Bearer ${auth.refresh}`);
-      headers.set("User-Agent", userAgent());
-      headers.set("Openai-Intent", "conversation-edits");
-      headers.set("x-initiator", "user");
-      if (isVisionBody(input.body)) {
-        headers.set("Copilot-Vision-Request", "true");
-      }
-
-      return {
-        url: openAICompatibleUrl(
-          base(auth.enterprise_url ?? auth.enterpriseUrl),
-          input.inboundUrl,
-        ),
-        method: input.method,
-        headers,
-        body: input.body,
-      };
-    },
+    prepareChat: prepare,
+    prepareResponses: prepare,
   };
 }

@@ -9,18 +9,23 @@ export type OpenAIProviderConfig = {
 export function createOpenAIProvider(
   config: OpenAIProviderConfig,
 ): ProviderRuntime {
+  const prepare = async (
+    input: Parameters<ProviderRuntime["prepareChat"]>[0],
+  ) => {
+    const headers = new Headers(input.headers);
+    headers.set("authorization", `Bearer ${config.api_key}`);
+    return {
+      url: openAICompatibleUrl(config.base_url, input.inboundUrl),
+      method: input.method,
+      headers,
+      body: input.body,
+    };
+  };
+
   return {
     id: "openai",
     label: "OpenAI-compatible API",
-    async prepareChat(input) {
-      const headers = new Headers(input.headers);
-      headers.set("authorization", `Bearer ${config.api_key}`);
-      return {
-        url: openAICompatibleUrl(config.base_url, input.inboundUrl),
-        method: input.method,
-        headers,
-        body: input.body,
-      };
-    },
+    prepareChat: prepare,
+    prepareResponses: prepare,
   };
 }

@@ -39,11 +39,13 @@ function expandHome(p: string): string {
   return p.startsWith("~/") || p === "~" ? join(homedir(), p.slice(1)) : p;
 }
 
-function extractMessages(requestBytes: Uint8Array): Message[] {
+export function extractMessages(requestBytes: Uint8Array): Message[] {
   const parsed = tryParseJSON(decodeBytes(requestBytes));
   if (parsed && typeof parsed === "object") {
     const messages = (parsed as { messages?: unknown }).messages;
     if (Array.isArray(messages)) return messages as Message[];
+    const input = (parsed as { input?: unknown }).input;
+    if (Array.isArray(input)) return input as Message[];
   }
   return [];
 }

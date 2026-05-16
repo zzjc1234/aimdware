@@ -1,5 +1,9 @@
 import type { AuthStore, OAuthAuth } from "./auth-store";
-import type { ProviderFetchOpts, ProviderRuntime } from "./plugin";
+import {
+  UnsupportedProviderProtocolError,
+  type ProviderFetchOpts,
+  type ProviderRuntime,
+} from "./plugin";
 import { userAgent } from "./plugin";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -104,29 +108,35 @@ async function currentAuth(opts: CodexProviderOpts): Promise<OAuthAuth> {
 }
 
 export function createCodexProvider(opts: CodexProviderOpts): ProviderRuntime {
+  const prepareResponses = async (
+    input: Parameters<ProviderRuntime["prepareResponses"]>[0],
+  ) => {
+    const auth = await currentAuth(opts);
+    const headers = new Headers(input.headers);
+    headers.delete("authorization");
+    headers.delete("Authorization");
+    headers.set("authorization", `Bearer ${auth.access}`);
+    headers.set("originator", "aimdware-router");
+    headers.set("User-Agent", userAgent());
+    const accountId = auth.account_id ?? auth.accountId;
+    if (accountId) headers.set("ChatGPT-Account-Id", accountId);
+
+    return {
+      url: new URL(CODEX_API_ENDPOINT),
+      method: input.method,
+      headers,
+      body: input.body,
+    };
+  };
+
   return {
     id: "codex",
     label: "ChatGPT Codex subscription",
-    async prepareChat(input) {
-      const auth = await currentAuth(opts);
-      const headers = new Headers(input.headers);
-      headers.delete("authorization");
-      headers.delete("Authorization");
-      headers.set("authorization", `Bearer ${auth.access}`);
-      headers.set("originator", "aimdware-router");
-      headers.set("User-Agent", userAgent());
-      const accountId = auth.account_id ?? auth.accountId;
-      if (accountId) headers.set("ChatGPT-Account-Id", accountId);
-
-      const isChatRequest =
-        input.inboundUrl.pathname.includes("/v1/responses") ||
-        input.inboundUrl.pathname.includes("/chat/completions");
-      return {
-        url: isChatRequest ? new URL(CODEX_API_ENDPOINT) : input.inboundUrl,
-        method: input.method,
-        headers,
-        body: input.body,
-      };
+    async prepareChat() {
+      throw new UnsupportedProviderProtocolError(
+        "provider codex does not support /v1/chat/completions; use /v1/responses",
+      );
     },
+    prepareResponses,
   };
 }

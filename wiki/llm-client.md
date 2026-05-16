@@ -1,8 +1,9 @@
 # LLM client
 
 Single binary on the student's machine. Sits between the coding agent
-and an OpenAI-compatible upstream. Three things happen per chat call,
-all off the student's critical path:
+and an upstream that may speak either OpenAI Chat Completions or OpenAI
+Responses. Three things happen per model call, all off the student's
+critical path:
 
 1. **forward** the request to upstream, stream the response back to the
    client byte-for-byte;
@@ -49,6 +50,22 @@ upstream:
 
 The subscription tokens are stored in `local_cache_dir/auth.json`, not
 in `aimdware.yaml`.
+
+## API surface
+
+The router exposes both modern OpenAI API shapes:
+
+```text
+POST /v1/chat/completions
+POST /v1/responses
+```
+
+`plugin: openai` forwards both paths to the configured `base_url`, so
+OpenRouter/SJTU-style OpenAI-compatible gateways can use whichever API
+they support. `plugin: codex` is a native Responses provider matching
+opencode's Codex path, so clients should call `/v1/responses`; the
+router deliberately does not send Chat Completions bodies to the Codex
+Responses endpoint.
 
 ### What the router holds and what it doesn't
 

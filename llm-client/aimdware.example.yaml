@@ -33,8 +33,11 @@ tbox_user: REPLACE_ME
 tbox_pass: REPLACE_ME
 
 # Upstream LLM provider. `openai` means any OpenAI-compatible API
-# (OpenAI, Kimi, GLM, DeepSeek, Qwen, chatanywhere, ...). `codex`
-# and `copilot` use local subscription auth plugins; run:
+# (OpenAI, OpenRouter, Kimi, GLM, DeepSeek, Qwen, chatanywhere, ...).
+# The router exposes both /v1/chat/completions and /v1/responses and
+# forwards them to this base_url. `codex` is a native Responses provider;
+# point compatible clients at /v1/responses. `copilot` uses local
+# subscription auth. For subscriptions, run:
 #   ./aimdware-router --config ./aimdware.yaml auth login codex
 # or:
 #   ./aimdware-router --config ./aimdware.yaml auth login copilot

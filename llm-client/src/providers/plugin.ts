@@ -20,7 +20,17 @@ export type ProviderRuntime = {
   id: ProviderId;
   label: string;
   prepareChat(input: ProviderPrepareInput): Promise<ProviderPreparedRequest>;
+  prepareResponses(
+    input: ProviderPrepareInput,
+  ): Promise<ProviderPreparedRequest>;
 };
+
+export class UnsupportedProviderProtocolError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnsupportedProviderProtocolError";
+  }
+}
 
 export type ProviderFetchOpts = {
   fetchImpl?: FetchLike;

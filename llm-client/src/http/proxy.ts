@@ -34,6 +34,23 @@ export async function proxyChat(
   upstream: UpstreamConfig | ProviderRuntime,
   opts: ProxyChatOpts = {},
 ): Promise<Response> {
+  return proxyPrepared(inbound, upstream, "chat", opts);
+}
+
+export async function proxyResponses(
+  inbound: Request,
+  upstream: UpstreamConfig | ProviderRuntime,
+  opts: ProxyChatOpts = {},
+): Promise<Response> {
+  return proxyPrepared(inbound, upstream, "responses", opts);
+}
+
+async function proxyPrepared(
+  inbound: Request,
+  upstream: UpstreamConfig | ProviderRuntime,
+  protocol: "chat" | "responses",
+  opts: ProxyChatOpts,
+): Promise<Response> {
   const inboundUrl = new URL(inbound.url);
 
   const forwardedHeaders = new Headers();
@@ -49,7 +66,9 @@ export async function proxyChat(
       : await inbound.arrayBuffer();
   const provider =
     "prepareChat" in upstream ? upstream : createOpenAIProvider(upstream);
-  const prepared = await provider.prepareChat({
+  const prepare =
+    protocol === "chat" ? provider.prepareChat : provider.prepareResponses;
+  const prepared = await prepare({
     inboundUrl,
     method: inbound.method,
     headers: forwardedHeaders,
