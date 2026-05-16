@@ -1,8 +1,9 @@
 import { captureChat, type CaptureResult } from "../recording/capture";
 import { proxyChat, type FetchLike, type UpstreamConfig } from "./proxy";
+import type { ProviderRuntime } from "../providers/plugin";
 
 export type HandlerOpts = {
-  upstream: UpstreamConfig;
+  upstream: UpstreamConfig | ProviderRuntime;
   onCapture?: (result: CaptureResult) => void | Promise<void>;
   fetchImpl?: FetchLike;
 };

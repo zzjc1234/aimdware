@@ -1,4 +1,6 @@
 import { getProxyForUrl } from "./net";
+import { createOpenAIProvider } from "../providers/openai";
+import type { ProviderRuntime } from "../providers/plugin";
 
 export type UpstreamConfig = {
   base_url: string;
@@ -29,20 +31,10 @@ const HOP_BY_HOP_HEADERS = new Set([
 
 export async function proxyChat(
   inbound: Request,
-  upstream: UpstreamConfig,
+  upstream: UpstreamConfig | ProviderRuntime,
   opts: ProxyChatOpts = {},
 ): Promise<Response> {
   const inboundUrl = new URL(inbound.url);
-  // We can't use `new URL(absolutePath, base)` because that drops base's
-  // path component. Concatenate explicitly, then dedupe a `/v1` if the
-  // user put it in both `base_url` and (per OpenAI convention) we got
-  // `/v1/chat/completions` inbound.
-  const base = upstream.base_url.replace(/\/+$/, "");
-  let path = inboundUrl.pathname;
-  if (base.endsWith("/v1") && path.startsWith("/v1/")) {
-    path = path.slice("/v1".length);
-  }
-  const target = new URL(base + path + inboundUrl.search);
 
   const forwardedHeaders = new Headers();
   inbound.headers.forEach((value, key) => {
@@ -50,22 +42,31 @@ export async function proxyChat(
       forwardedHeaders.set(key, value);
     }
   });
-  forwardedHeaders.set("authorization", `Bearer ${upstream.api_key}`);
 
-  const proxy = getProxyForUrl(target);
+  const body =
+    inbound.method === "GET" || inbound.method === "HEAD"
+      ? undefined
+      : await inbound.arrayBuffer();
+  const provider =
+    "prepareChat" in upstream ? upstream : createOpenAIProvider(upstream);
+  const prepared = await provider.prepareChat({
+    inboundUrl,
+    method: inbound.method,
+    headers: forwardedHeaders,
+    body,
+  });
+
+  const proxy = getProxyForUrl(prepared.url);
   const f: FetchLike = opts.fetchImpl ?? (fetch as unknown as FetchLike);
 
   const init: RequestInit & { proxy?: string } = {
-    method: inbound.method,
-    headers: forwardedHeaders,
-    body:
-      inbound.method === "GET" || inbound.method === "HEAD"
-        ? undefined
-        : await inbound.arrayBuffer(),
+    method: prepared.method ?? inbound.method,
+    headers: prepared.headers,
+    body: body === undefined ? undefined : (prepared.body ?? body),
   };
   if (proxy !== undefined) init.proxy = proxy;
 
-  const upstreamRes = await f(target, init);
+  const upstreamRes = await f(prepared.url, init);
 
   return new Response(upstreamRes.body, {
     status: upstreamRes.status,

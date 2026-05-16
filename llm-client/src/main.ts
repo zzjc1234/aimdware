@@ -6,6 +6,10 @@ import { homedir } from "node:os";
 import { loadConfig, type Config } from "./config";
 import { createHandler } from "./http/handler";
 import { startServer } from "./http/server";
+import { createFileAuthStore } from "./providers/auth-store";
+import type { AuthStore } from "./providers/auth-store";
+import { loginCodexDevice, loginCopilotDevice } from "./providers/auth-login";
+import { createProvider } from "./providers";
 import { IngestQueue } from "./outbox/queue";
 import {
   startWorkerLoop,
@@ -42,6 +46,46 @@ function extractMessages(requestBytes: Uint8Array): Message[] {
     if (Array.isArray(messages)) return messages as Message[];
   }
   return [];
+}
+
+async function runAuthCommand(
+  positionals: string[],
+  authStore: AuthStore,
+  enterpriseUrl: string | undefined,
+): Promise<boolean> {
+  if (positionals[0] !== "auth") return false;
+  const action = positionals[1];
+  const provider = positionals[2];
+
+  if (action === "status") {
+    for (const id of ["codex", "copilot"] as const) {
+      const auth = await authStore.get(id);
+      if (!auth) {
+        console.log(`${id}: not logged in`);
+        continue;
+      }
+      console.log(
+        `${id}: logged in token=${redactToken(auth.access ?? auth.refresh)}`,
+      );
+    }
+    return true;
+  }
+
+  if (action === "login" && provider === "codex") {
+    await loginCodexDevice({ authStore });
+    console.log("codex: logged in");
+    return true;
+  }
+
+  if (action === "login" && provider === "copilot") {
+    await loginCopilotDevice({ authStore, enterpriseUrl });
+    console.log("copilot: logged in");
+    return true;
+  }
+
+  throw new Error(
+    "unknown auth command; expected `auth status`, `auth login codex`, or `auth login copilot`",
+  );
 }
 
 /**
@@ -124,13 +168,14 @@ function buildStages(
 }
 
 async function main() {
-  const { values } = parseArgs({
+  const { values, positionals } = parseArgs({
     args: Bun.argv.slice(2),
     options: {
       config: { type: "string", short: "c", default: "./aimdware.yaml" },
       help: { type: "boolean", short: "h" },
+      "enterprise-url": { type: "string" },
     },
-    allowPositionals: false,
+    allowPositionals: true,
   });
 
   if (values.help) {
@@ -138,6 +183,9 @@ async function main() {
 
 Usage:
   aimdware-router --config <path>          start the router
+  aimdware-router --config <path> auth status
+  aimdware-router --config <path> auth login codex
+  aimdware-router --config <path> auth login copilot [--enterprise-url <domain>]
   aimdware-router --help                   show this message
 
 The config file is a YAML doc. See aimdware.example.yaml for the
@@ -161,10 +209,23 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
   const cacheDir = expandHome(config.local_cache_dir);
   await mkdir(join(cacheDir, "records"), { recursive: true });
   const queueDb = join(cacheDir, "queue.db");
+  const authStore = createFileAuthStore(join(cacheDir, "auth.json"));
+
+  try {
+    if (
+      await runAuthCommand(positionals, authStore, values["enterprise-url"])
+    ) {
+      return;
+    }
+  } catch (e) {
+    console.error((e as Error).message);
+    process.exit(1);
+  }
 
   const queue = new IngestQueue(queueDb);
   const sessionTracker = new SessionTracker();
   const pendingCacheWrites = new PendingSessionWrites();
+  const provider = createProvider(config.upstream, authStore);
   const webdavPut = makeWebDAVPut(
     config.tbox_url,
     config.tbox_user
@@ -173,10 +234,7 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
   );
 
   const handler = createHandler({
-    upstream: {
-      base_url: config.upstream.base_url,
-      api_key: config.upstream.api_key,
-    },
+    upstream: provider,
     onCapture: async (result) => {
       const messages = extractMessages(result.request_bytes);
       const cls = sessionTracker.classify(messages, result.ts);
@@ -264,10 +322,13 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
   console.log(
     `aimdware-router listening on http://${handle.hostname}:${handle.port}`,
   );
-  console.log(
-    `  upstream:    ${config.upstream.base_url} (${config.upstream.type})`,
-  );
-  console.log(`  upstream key: ${redactToken(config.upstream.api_key)}`);
+  console.log(`  upstream:    ${provider.label} (${provider.id})`);
+  if (config.upstream.plugin === "openai") {
+    console.log(`  upstream url: ${config.upstream.base_url}`);
+    console.log(`  upstream key: ${redactToken(config.upstream.api_key)}`);
+  } else {
+    console.log(`  upstream auth: ${join(cacheDir, "auth.json")}`);
+  }
   console.log(`  student token: ${redactToken(config.student_token)}`);
   console.log(`  course:      ${config.course}`);
   console.log(`  backend:     ${config.backend_url}`);

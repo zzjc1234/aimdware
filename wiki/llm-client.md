@@ -19,9 +19,9 @@ student_token: st_... # one per student; TT hands it directly
 course: ECE4721J # course code slug; sent with every ingest call
 assignment: hw1 # TT-decreed slug; A-Z/a-z/0-9/_.-
 upstream:
-  type: openai # default; only openai supported in v1
+  plugin: openai # openai, codex, or copilot; `type` remains an alias
   base_url: https://models.sjtu.edu.cn/api/v1
-  api_key: sk-... # student's own
+  api_key: sk-... # required only for openai-compatible API providers
 port: 12345 # router listens here
 local_cache_dir: ~/.cache/aimdware # outbox + blob cache
 backend_url: https://aimdware.example.edu
@@ -33,18 +33,37 @@ tbox_pass: <password or app token>
 # jbox_remote_path: aimdware/ECE4721J/hw1
 ```
 
+For ChatGPT/Codex or GitHub Copilot subscription routing, log in once
+and switch the plugin:
+
+```bash
+aimdware-router --config ./aimdware.yaml auth login codex
+aimdware-router --config ./aimdware.yaml auth login copilot
+aimdware-router --config ./aimdware.yaml auth status
+```
+
+```yaml
+upstream:
+  plugin: codex # or copilot
+```
+
+The subscription tokens are stored in `local_cache_dir/auth.json`, not
+in `aimdware.yaml`.
+
 ### What the router holds and what it doesn't
 
 | Credential | Where | What it can do |
 |---|---|---|
 | `student_token` | `aimdware.yaml`, mode 600 | POST to backend `/ingest/*` |
-| `upstream.api_key` | same file | call the student's chosen LLM provider |
+| `upstream.api_key` | same file, only for `plugin: openai` | call the student's chosen LLM provider |
+| subscription OAuth tokens | `local_cache_dir/auth.json`, only for `plugin: codex/copilot` | call that student's subscription provider |
 | `tbox_user`/`tbox_pass` | same file | PUT to the student's chosen WebDAV |
 | **NOT held**: backend admin secret, TT credentials, other students' data |
 
-If `aimdware.yaml` leaks, all three secrets are compromised. The
-backend can mint a new `student_token` via `aimdware-admin token issue`;
-LLM provider and WebDAV credentials are the student's own to rotate.
+If `aimdware.yaml` leaks, the file-backed secrets in that YAML are
+compromised. The backend can mint a new `student_token` via
+`aimdware-admin token issue`; LLM provider, subscription OAuth, and
+WebDAV credentials are the student's own to rotate.
 
 ### Why "tbox_*" instead of "webdav_*"
 

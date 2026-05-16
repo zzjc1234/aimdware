@@ -120,3 +120,61 @@ backend_url: https://b.example
   const config = loadConfig(yaml);
   expect(config.upstream.type).toBe("openai");
 });
+
+test("loadConfig parses subscription plugins without an api_key", () => {
+  for (const plugin of ["codex", "copilot"] as const) {
+    const yaml = `
+student_token: st_x
+course: ECE4721J
+assignment: hw1
+upstream:
+  plugin: ${plugin}
+backend_url: https://b.example
+`;
+    const config = loadConfig(yaml);
+    expect(config.upstream.plugin).toBe(plugin);
+    expect(config.upstream.type).toBe(plugin);
+    expect(config.upstream.api_key).toBeUndefined();
+  }
+});
+
+test("loadConfig keeps upstream.type as a backward-compatible plugin alias", () => {
+  const yaml = `
+student_token: st_x
+course: ECE4721J
+assignment: hw1
+upstream:
+  type: copilot
+backend_url: https://b.example
+`;
+  const config = loadConfig(yaml);
+  expect(config.upstream.plugin).toBe("copilot");
+  expect(config.upstream.type).toBe("copilot");
+});
+
+test("loadConfig rejects api-key OpenAI upstreams without an api_key", () => {
+  const yaml = `
+student_token: st_x
+course: ECE4721J
+assignment: hw1
+upstream:
+  plugin: openai
+backend_url: https://b.example
+`;
+  expect(() => loadConfig(yaml)).toThrow("upstream.api_key is required");
+});
+
+test("loadConfig rejects conflicting upstream.type and upstream.plugin", () => {
+  const yaml = `
+student_token: st_x
+course: ECE4721J
+assignment: hw1
+upstream:
+  type: codex
+  plugin: copilot
+backend_url: https://b.example
+`;
+  expect(() => loadConfig(yaml)).toThrow(
+    "upstream.type and upstream.plugin must match",
+  );
+});

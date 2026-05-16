@@ -32,12 +32,24 @@ tbox_url: http://127.0.0.1:50471
 tbox_user: REPLACE_ME
 tbox_pass: REPLACE_ME
 
-# Upstream LLM provider (any OpenAI-compatible API works — OpenAI,
-# Kimi, GLM, DeepSeek, Qwen, chatanywhere, …).
+# Upstream LLM provider. `openai` means any OpenAI-compatible API
+# (OpenAI, Kimi, GLM, DeepSeek, Qwen, chatanywhere, ...). `codex`
+# and `copilot` use local subscription auth plugins; run:
+#   ./aimdware-router --config ./aimdware.yaml auth login codex
+# or:
+#   ./aimdware-router --config ./aimdware.yaml auth login copilot
 upstream:
-  type: openai
+  plugin: openai
   base_url: https://api.openai.com
   api_key: sk-REPLACE_ME
+
+# ChatGPT/Codex subscription example:
+# upstream:
+#   plugin: codex
+#
+# GitHub Copilot subscription example:
+# upstream:
+#   plugin: copilot
 
 # ---- optional (defaults shown) ----
 
