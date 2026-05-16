@@ -42,6 +42,11 @@ export type WorkerOpts = {
   now?: () => number;
   backoff?: number[];
   concurrency?: number;
+  afterAdvance?: (
+    body: IngestBody,
+    from: RecordState,
+    to: RecordState,
+  ) => void | Promise<void>;
 };
 
 export type RunSummary = {
@@ -117,7 +122,7 @@ export async function runOnce(
             reason: (e as Error).message ?? "handler threw",
           };
         }
-        applyResult(
+        const advancedTo = applyResult(
           opts.queue,
           slot.body.record_id,
           slot.state,
@@ -125,6 +130,13 @@ export async function runOnce(
           now,
           backoff,
         );
+        if (advancedTo !== undefined) {
+          try {
+            await opts.afterAdvance?.(slot.body, slot.state, advancedTo);
+          } catch (e) {
+            console.error("afterAdvance failed:", (e as Error).message);
+          }
+        }
         if (result.kind === "advance") summary.advance += 1;
         else if (result.kind === "retry") summary.retry += 1;
         else summary.terminal += 1;
@@ -143,11 +155,12 @@ function applyResult(
   result: StageResult,
   now: number,
   backoff: number[],
-): void {
+): RecordState | undefined {
   switch (result.kind) {
     case "advance": {
-      queue.advance(recordId, nextStateAfter(currentState), now);
-      break;
+      const nextState = nextStateAfter(currentState);
+      queue.advance(recordId, nextState, now);
+      return nextState;
     }
     case "retry": {
       const attempts = queue.statusOf(recordId)?.attempts ?? 0;
@@ -156,11 +169,11 @@ function applyResult(
         result.reason,
         now + nextBackoff(attempts, backoff),
       );
-      break;
+      return undefined;
     }
     case "terminal": {
       queue.markTerminal(recordId, result.finalState, result.reason);
-      break;
+      return undefined;
     }
   }
 }

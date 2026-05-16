@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { IngestQueue } from "./queue";
 import type { IngestBody } from "./ingest-client";
-import { runEvictionOnce } from "./eviction";
+import { runEvictionOnce, runSessionCacheCleanupOnce } from "./eviction";
 
 const tmpDirs: string[] = [];
 function fresh() {
@@ -171,6 +171,74 @@ test("does NOT evict when the latest turn is still within TTL", async () => {
   });
   expect(summary.sessions_evicted).toBe(0);
   expect(existsSync(join(recordsDir, "S-fresh.json"))).toBe(true);
+  q.close();
+});
+
+test("cleanup deletes a session cache immediately once every turn is synced or later", async () => {
+  const { cacheDir, recordsDir, q } = fresh();
+  q.enqueue(body("r1", "S-uploaded", 1), 0);
+  q.advance("r1", "ingested", 0);
+  q.advance("r1", "synced", 0);
+  q.enqueue(body("r2", "S-uploaded", 2), 0);
+  q.advance("r2", "ingested", 0);
+  q.advance("r2", "synced", 0);
+  writeFileSync(join(recordsDir, "S-uploaded.json"), "payload");
+
+  const summary = await runSessionCacheCleanupOnce({
+    queue: q,
+    cacheDir,
+    session_id: "S-uploaded",
+  });
+
+  expect(summary.sessions_evicted).toBe(1);
+  expect(summary.records_marked).toBe(2);
+  expect(existsSync(join(recordsDir, "S-uploaded.json"))).toBe(false);
+  expect(q.isEvicted("r1")).toBe(true);
+  expect(q.isEvicted("r2")).toBe(true);
+  q.close();
+});
+
+test("cleanup keeps a session cache while any turn still needs upload", async () => {
+  const { cacheDir, recordsDir, q } = fresh();
+  q.enqueue(body("r1", "S-pending", 1), 0);
+  q.advance("r1", "ingested", 0);
+  q.advance("r1", "synced", 0);
+  q.enqueue(body("r2", "S-pending", 2), 0);
+  q.advance("r2", "ingested", 0);
+  writeFileSync(join(recordsDir, "S-pending.json"), "payload");
+
+  const summary = await runSessionCacheCleanupOnce({
+    queue: q,
+    cacheDir,
+    session_id: "S-pending",
+  });
+
+  expect(summary.sessions_evicted).toBe(0);
+  expect(summary.records_marked).toBe(0);
+  expect(existsSync(join(recordsDir, "S-pending.json"))).toBe(true);
+  expect(q.isEvicted("r1")).toBe(false);
+  expect(q.isEvicted("r2")).toBe(false);
+  q.close();
+});
+
+test("ttl eviction cleans up old synced sessions if fast cleanup was missed", async () => {
+  const { cacheDir, recordsDir, q } = fresh();
+  q.enqueue(body("r1", "S-synced-old", 1), 0);
+  q.advance("r1", "ingested", 0);
+  q.advance("r1", "synced", 0);
+  backdate(cacheDir, "r1", NOW - TTL - 1000);
+  writeFileSync(join(recordsDir, "S-synced-old.json"), "payload");
+
+  const summary = await runEvictionOnce({
+    queue: q,
+    cacheDir,
+    now: () => NOW,
+    ttlMs: TTL,
+  });
+
+  expect(summary.sessions_evicted).toBe(1);
+  expect(existsSync(join(recordsDir, "S-synced-old.json"))).toBe(false);
+  expect(q.isEvicted("r1")).toBe(true);
   q.close();
 });
 

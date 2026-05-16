@@ -19,7 +19,10 @@ import {
 } from "./outbox/ingest-client";
 import { syncBlob, makeWebDAVPut, type WebDAVPutLike } from "./outbox/sync";
 import { writeAtomic, bytesToHex, redactToken, sessionBlobPath } from "./util";
-import { startEvictionLoop } from "./outbox/eviction";
+import {
+  runSessionCacheCleanupOnce,
+  startEvictionLoop,
+} from "./outbox/eviction";
 import { tryParseJSON, decodeBytes } from "./recording/capture";
 import { SessionTracker, type Message } from "./recording/session";
 import { buildSessionBlob } from "./recording/session-blob";
@@ -160,6 +163,7 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
 
   const queue = new IngestQueue(queueDb);
   const sessionTracker = new SessionTracker();
+  const pendingCacheWrites = new Set<string>();
   const webdavPut = makeWebDAVPut(
     config.tbox_url,
     config.tbox_user
@@ -190,34 +194,39 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
       });
 
       const blobPath = sessionBlobPath(cacheDir, cls.session_id);
+      pendingCacheWrites.add(cls.session_id);
       try {
-        await writeAtomic(blobPath, blob.blob_bytes);
-      } catch (e) {
-        console.error(
-          `cache write failed for record=${result.record_id} session=${cls.session_id}:`,
-          (e as Error).message,
-        );
-        return;
-      }
+        try {
+          await writeAtomic(blobPath, blob.blob_bytes);
+        } catch (e) {
+          console.error(
+            `cache write failed for record=${result.record_id} session=${cls.session_id}:`,
+            (e as Error).message,
+          );
+          return;
+        }
 
-      const body: IngestBody = {
-        record_id: result.record_id,
-        session_id: cls.session_id,
-        turn_count: cls.turn_count,
-        course_code: config.course,
-        assignment: config.assignment,
-        blob_hash: bytesToHex(blob.blob_hash),
-        blob_uri: `${config.jbox_remote_path}/${cls.session_id}.json`,
-        blob_size: blob.blob_size,
-        ts: result.ts.toISOString(),
-        router_version: ROUTER_VERSION,
-        client_meta: { upstream_type: config.upstream.type },
-      };
-      queue.enqueue(body, Date.now());
-      const hex = bytesToHex(blob.blob_hash).slice(0, 16);
-      console.log(
-        `captured record=${result.record_id} session=${cls.session_id} turn=${cls.turn_count} hash=${hex}… size=${blob.blob_size} -> queued`,
-      );
+        const body: IngestBody = {
+          record_id: result.record_id,
+          session_id: cls.session_id,
+          turn_count: cls.turn_count,
+          course_code: config.course,
+          assignment: config.assignment,
+          blob_hash: bytesToHex(blob.blob_hash),
+          blob_uri: `${config.jbox_remote_path}/${cls.session_id}.json`,
+          blob_size: blob.blob_size,
+          ts: result.ts.toISOString(),
+          router_version: ROUTER_VERSION,
+          client_meta: { upstream_type: config.upstream.type },
+        };
+        queue.enqueue(body, Date.now());
+        const hex = bytesToHex(blob.blob_hash).slice(0, 16);
+        console.log(
+          `captured record=${result.record_id} session=${cls.session_id} turn=${cls.turn_count} hash=${hex}… size=${blob.blob_size} -> queued`,
+        );
+      } finally {
+        pendingCacheWrites.delete(cls.session_id);
+      }
     },
   });
 
@@ -231,6 +240,19 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
       queue,
       stages: buildStages(config, cacheDir, webdavPut),
       concurrency: 4,
+      afterAdvance: async (body, from, to) => {
+        if (
+          from === "ingested" &&
+          to === "synced" &&
+          !pendingCacheWrites.has(body.session_id)
+        ) {
+          await runSessionCacheCleanupOnce({
+            queue,
+            cacheDir,
+            session_id: body.session_id,
+          });
+        }
+      },
     },
     1000,
   );

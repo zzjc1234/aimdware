@@ -66,6 +66,25 @@ test("ingested + sync.advance -> state=synced", async () => {
   q.close();
 });
 
+test("sync.advance fires afterAdvance after the row reaches synced", async () => {
+  const q = freshQueue();
+  q.enqueue(body("r1"), 0);
+  q.advance("r1", "ingested", 0);
+  const seen: Array<{ from: string; to: string; state: string | undefined }> =
+    [];
+  await runOnce({
+    queue: q,
+    stages: stub3(advance),
+    now: () => 100,
+    afterAdvance: async (b, from, to) => {
+      seen.push({ from, to, state: q.statusOf(b.record_id)?.state });
+    },
+  });
+
+  expect(seen).toEqual([{ from: "ingested", to: "synced", state: "synced" }]);
+  q.close();
+});
+
 test("synced + confirm.advance -> state=done", async () => {
   const q = freshQueue();
   q.enqueue(body("r1"), 0);

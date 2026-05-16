@@ -40,13 +40,42 @@ export async function runEvictionOnce(
   const limit = opts.limit ?? DEFAULT_LIMIT;
   const threshold = now - ttlMs;
 
-  const sessions = opts.queue.findEvictableSessions(threshold, limit);
+  return evictSessions(
+    opts.queue,
+    opts.cacheDir,
+    opts.queue.findEvictableSessions(threshold, limit),
+  );
+}
+
+export type SessionCacheCleanupOpts = {
+  queue: IngestQueue;
+  cacheDir: string;
+  session_id: string;
+};
+
+/**
+ * Delete one session's local blob as soon as no queued record can still
+ * need to upload it. This is the fast path after WebDAV PUT succeeds;
+ * the periodic TTL eviction remains as a fallback for old terminal rows.
+ */
+export async function runSessionCacheCleanupOnce(
+  opts: SessionCacheCleanupOpts,
+): Promise<EvictionSummary> {
+  const session = opts.queue.findReclaimableSession(opts.session_id);
+  return evictSessions(opts.queue, opts.cacheDir, session ? [session] : []);
+}
+
+async function evictSessions(
+  queue: IngestQueue,
+  cacheDir: string,
+  sessions: Array<{ session_id: string; record_ids: string[] }>,
+): Promise<EvictionSummary> {
   let sessions_evicted = 0;
   let records_marked = 0;
   for (const s of sessions) {
     let canMarkEvicted = true;
     try {
-      await unlink(sessionBlobPath(opts.cacheDir, s.session_id));
+      await unlink(sessionBlobPath(cacheDir, s.session_id));
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       if (code !== "ENOENT") {
@@ -58,7 +87,7 @@ export async function runEvictionOnce(
       }
     }
     if (!canMarkEvicted) continue;
-    for (const rid of s.record_ids) opts.queue.markEvicted(rid);
+    for (const rid of s.record_ids) queue.markEvicted(rid);
     sessions_evicted += 1;
     records_marked += s.record_ids.length;
   }

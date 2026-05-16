@@ -173,11 +173,12 @@ router processes too.
 
 ## Eviction
 
-Session-keyed blob cache is reclaimable when **every** record sharing
-that `session_id` has reached a terminal state (`done`, `conflict`, or
-`fatal`) AND the latest of them was created more than `ttlMs` ago
-(default 24 hours). One delete per session; all member records get
-`cache_evicted = 1`.
+Session-keyed blob cache is reclaimed immediately after WebDAV upload
+once **no** record sharing that `session_id` remains in `captured` or
+`ingested`. Those are the only states that still need to read
+`records/<session_id>.json`. The periodic TTL pass uses the same
+condition as a fallback, with `ttlMs` defaulting to 24 hours. One delete
+per session; all member records get `cache_evicted = 1`.
 
 The queue row itself never deletes — it remains a per-record audit
 trail on the student's disk.

@@ -238,8 +238,8 @@ export class IngestQueue {
    * Return sessions whose on-disk cache file is safe to delete. A session
    * is evictable when:
    *
-   *   - every record in the session is terminal: done, conflict, or fatal
-   *     (no in-flight turns that still need to read the file)
+   *   - no record in the session is captured or ingested (no turn still
+   *     needs to read and upload the file)
    *   - at least one record still has cache_evicted=0 (otherwise this
    *     session has already been processed)
    *   - MAX(created_at) across the session's records is older than the
@@ -260,7 +260,7 @@ export class IngestQueue {
          FROM outbox
          WHERE session_id IS NOT NULL
          GROUP BY session_id
-         HAVING SUM(CASE WHEN state IN ('done', 'conflict', 'fatal') THEN 0 ELSE 1 END) = 0
+         HAVING SUM(CASE WHEN state IN ('captured', 'ingested') THEN 1 ELSE 0 END) = 0
             AND SUM(CASE WHEN cache_evicted = 0 THEN 1 ELSE 0 END) > 0
             AND MAX(created_at) < ?
          ORDER BY MAX(created_at) ASC
@@ -274,6 +274,35 @@ export class IngestQueue {
       session_id: r.session_id,
       record_ids: r.record_ids.split(SEP),
     }));
+  }
+
+  /**
+   * Return one session whose cache file no longer needs to stay local.
+   *
+   * `captured` and `ingested` records still need `records/<session>.json`
+   * because the sync stage may read and upload it. Once every record in
+   * the session has moved to `synced` or any terminal state, jbox already
+   * has the bytes needed for future backend verification.
+   */
+  findReclaimableSession(
+    session_id: string,
+  ): { session_id: string; record_ids: string[] } | undefined {
+    const SEP = "\x1f";
+    const row = this.db
+      .prepare(
+        `SELECT session_id, group_concat(record_id, '${SEP}') AS record_ids
+         FROM outbox
+         WHERE session_id = ?
+         GROUP BY session_id
+         HAVING SUM(CASE WHEN state IN ('captured', 'ingested') THEN 1 ELSE 0 END) = 0
+            AND SUM(CASE WHEN cache_evicted = 0 THEN 1 ELSE 0 END) > 0`,
+      )
+      .get(session_id) as { session_id: string; record_ids: string } | null;
+    if (row === null) return undefined;
+    return {
+      session_id: row.session_id,
+      record_ids: row.record_ids.split(SEP),
+    };
   }
 
   markEvicted(record_id: string): void {
