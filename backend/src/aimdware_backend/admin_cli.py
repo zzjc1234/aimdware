@@ -361,6 +361,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_rl = s_rec.add_parser("list")
     p_rl.add_argument("--course", default=None)
     p_rl.add_argument("--user", default=None)
+    p_rl.add_argument("--assignment", default=None)
     p_rl.add_argument(
         "--status",
         default=None,
