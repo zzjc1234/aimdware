@@ -1,8 +1,39 @@
 import { test, expect } from "bun:test";
 import { proxyChat, proxyResponses, type FetchLike } from "../http/proxy";
-import { createCodexProvider } from "./codex";
+import { createCodexProvider, extractCodexAccountId } from "./codex";
 import { createCopilotProvider } from "./copilot";
+import { userAgent } from "./plugin";
 import type { AuthStore, ProviderAuth } from "./auth-store";
+
+function jwt(claims: Record<string, unknown>): string {
+  const part = (o: unknown) =>
+    Buffer.from(JSON.stringify(o)).toString("base64url");
+  return `${part({ alg: "none" })}.${part(claims)}.sig`;
+}
+
+function expiredCodexStore(): AuthStore {
+  return authStore({
+    type: "oauth",
+    access: "expired-access",
+    refresh: "refresh-token",
+    expires: 1,
+    account_id: "acct-old",
+  });
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+const responsesInput = () => ({
+  inboundUrl: new URL("http://router-local/v1/responses"),
+  method: "POST",
+  headers: new Headers(),
+  body: undefined,
+});
 
 const PROXY_ENV_KEYS = [
   "HTTP_PROXY",
@@ -150,7 +181,7 @@ test("codex provider strips max_output_tokens before forwarding", async () => {
     type: "oauth",
     access: "access-token",
     refresh: "refresh-token",
-    expires: Date.now() + 60_000,
+    expires: Date.now() + 600_000,
   });
   const upstreamBodies: string[] = [];
   const upstreamFetch: FetchLike = async (_input, init) => {
@@ -285,4 +316,149 @@ test("copilot provider marks agent-initiated chat requests", async () => {
   );
 
   expect(upstreamCalls[0]!.headers["x-initiator"]).toBe("agent");
+});
+
+test("codex refresh is single-flight under concurrent expired requests", async () => {
+  const store = expiredCodexStore();
+  let refreshCalls = 0;
+  const refreshFetch: FetchLike = async () => {
+    refreshCalls++;
+    await new Promise((r) => setTimeout(r, 5));
+    return jsonResponse({
+      access_token: "fresh-access",
+      refresh_token: "fresh-refresh",
+      expires_in: 3600,
+    });
+  };
+  const provider = createCodexProvider({
+    authStore: store,
+    fetchImpl: refreshFetch,
+  });
+
+  await Promise.all([
+    provider.prepareResponses(responsesInput()),
+    provider.prepareResponses(responsesInput()),
+  ]);
+
+  expect(refreshCalls).toBe(1);
+});
+
+test("codex refreshes when the token is within the 60s expiry skew window", async () => {
+  const store = authStore({
+    type: "oauth",
+    access: "soon-to-expire",
+    refresh: "refresh-token",
+    expires: Date.now() + 30_000,
+  });
+  let refreshed = false;
+  const refreshFetch: FetchLike = async () => {
+    refreshed = true;
+    return jsonResponse({
+      access_token: "fresh-access",
+      refresh_token: "fresh-refresh",
+      expires_in: 3600,
+    });
+  };
+
+  await createCodexProvider({
+    authStore: store,
+    fetchImpl: refreshFetch,
+  }).prepareResponses(responsesInput());
+
+  expect(refreshed).toBe(true);
+});
+
+test("codex refresh sends a User-Agent header", async () => {
+  const store = expiredCodexStore();
+  const seen: { ua: string | null } = { ua: null };
+  const refreshFetch: FetchLike = async (_input, init) => {
+    seen.ua = new Headers(init?.headers).get("user-agent");
+    return jsonResponse({
+      access_token: "fresh-access",
+      refresh_token: "fresh-refresh",
+      expires_in: 3600,
+    });
+  };
+
+  await createCodexProvider({
+    authStore: store,
+    fetchImpl: refreshFetch,
+  }).prepareResponses(responsesInput());
+
+  expect(seen.ua).toBe(userAgent());
+});
+
+test("codex refresh preserves the old refresh token when the response omits one", async () => {
+  const store = expiredCodexStore();
+  const refreshFetch: FetchLike = async () =>
+    jsonResponse({ access_token: "fresh-access", expires_in: 3600 });
+
+  await createCodexProvider({
+    authStore: store,
+    fetchImpl: refreshFetch,
+  }).prepareResponses(responsesInput());
+
+  expect(await store.get("codex")).toMatchObject({
+    access: "fresh-access",
+    refresh: "refresh-token",
+  });
+});
+
+test("codex refresh rejects a token response missing access_token without persisting", async () => {
+  const store = expiredCodexStore();
+  const refreshFetch: FetchLike = async () =>
+    jsonResponse({ refresh_token: "fresh-refresh", expires_in: 3600 });
+
+  await expect(
+    createCodexProvider({
+      authStore: store,
+      fetchImpl: refreshFetch,
+    }).prepareResponses(responsesInput()),
+  ).rejects.toThrow(/access_token/);
+
+  expect(await store.get("codex")).toMatchObject({ access: "expired-access" });
+});
+
+test("codex surfaces a re-login instruction and clears auth when the refresh token is rejected", async () => {
+  const store = expiredCodexStore();
+  const refreshFetch: FetchLike = async () =>
+    jsonResponse({ error: "invalid_grant" }, 400);
+
+  await expect(
+    createCodexProvider({
+      authStore: store,
+      fetchImpl: refreshFetch,
+    }).prepareResponses(responsesInput()),
+  ).rejects.toThrow(/auth login codex/);
+
+  expect(await store.get("codex")).toBeUndefined();
+});
+
+test("codex treats a 401 refresh as terminal re-login", async () => {
+  const store = expiredCodexStore();
+  const refreshFetch: FetchLike = async () =>
+    new Response("nope", { status: 401 });
+
+  await expect(
+    createCodexProvider({
+      authStore: store,
+      fetchImpl: refreshFetch,
+    }).prepareResponses(responsesInput()),
+  ).rejects.toThrow(/auth login codex/);
+});
+
+test("extractCodexAccountId uses explicit chatgpt_account_id but ignores organizations fallback", () => {
+  expect(
+    extractCodexAccountId({
+      access_token: "x",
+      id_token: jwt({ chatgpt_account_id: "acct-123" }),
+    }),
+  ).toBe("acct-123");
+
+  expect(
+    extractCodexAccountId({
+      access_token: "x",
+      id_token: jwt({ organizations: [{ id: "org-999" }] }),
+    }),
+  ).toBeUndefined();
 });
