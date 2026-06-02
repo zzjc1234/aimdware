@@ -489,6 +489,46 @@ test("codex treats a 401 refresh as terminal re-login", async () => {
   ).rejects.toThrow(/auth login codex/);
 });
 
+test("codex adopts a concurrently-rotated token instead of deleting on invalid_grant", async () => {
+  // Multiple router processes share one cache. Both read expired R1; another
+  // process rotates to R2 and persists. Our refresh of R1 then fails with
+  // invalid_grant — we must adopt the stored R2, NOT delete the credential.
+  const NOW = 1_000_000;
+  let gets = 0;
+  let dels = 0;
+  const rotated = {
+    type: "oauth" as const,
+    access: "rotated-by-other-process",
+    refresh: "R2",
+    expires: NOW + 600_000,
+  };
+  const store: AuthStore = {
+    async get() {
+      gets++;
+      return gets <= 2
+        ? { type: "oauth", access: "stale", refresh: "R1", expires: 1 }
+        : rotated;
+    },
+    async set() {},
+    async del() {
+      dels++;
+    },
+  };
+  const refreshFetch: FetchLike = async () =>
+    jsonResponse({ error: "invalid_grant" }, 400);
+
+  const prepared = await createCodexProvider({
+    authStore: store,
+    fetchImpl: refreshFetch,
+    now: () => NOW,
+  }).prepareResponses(responsesInput());
+
+  expect(prepared.headers.get("authorization")).toBe(
+    "Bearer rotated-by-other-process",
+  );
+  expect(dels).toBe(0);
+});
+
 test("extractCodexAccountId uses explicit chatgpt_account_id but ignores organizations fallback", () => {
   expect(
     extractCodexAccountId({

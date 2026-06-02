@@ -211,9 +211,11 @@ async function currentAuth(
   // with the now-invalid one.
   if (gate.inFlight) return gate.inFlight;
   gate.inFlight = (async () => {
+    let usedRefresh = "";
     try {
       const auth = await readAuth();
       if (isFresh(auth)) return auth;
+      usedRefresh = auth.refresh;
       const tokens = await refreshAccessToken(auth.refresh, {
         now,
         fetchImpl: fetchImpl!,
@@ -229,10 +231,29 @@ async function currentAuth(
       await opts.authStore.set("codex", next);
       return next;
     } catch (e) {
-      // A terminal failure means the stored credential is dead — drop it so
-      // `auth status` reflects reality and the next request fails fast.
       if (e instanceof CodexReauthRequiredError) {
-        await opts.authStore.del("codex");
+        // Another router process (sharing this cache) may have rotated the
+        // token between our read and our failed refresh — single-use refresh
+        // tokens mean the loser of a concurrent refresh gets invalid_grant.
+        // If the stored token has since changed, adopt the fresh one rather
+        // than deleting the credential everyone is now using.
+        const latest = await opts.authStore.get("codex");
+        if (
+          latest?.type === "oauth" &&
+          latest.refresh !== usedRefresh &&
+          isFresh(latest)
+        ) {
+          return latest;
+        }
+        // The stored token is still the one we failed with: a genuine
+        // revocation. Drop it so `auth status` reflects reality.
+        if (
+          !latest ||
+          latest.type !== "oauth" ||
+          latest.refresh === usedRefresh
+        ) {
+          await opts.authStore.del("codex");
+        }
       }
       throw e;
     } finally {
