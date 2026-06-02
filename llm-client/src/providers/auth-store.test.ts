@@ -1,5 +1,5 @@
 import { test, expect, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createFileAuthStore } from "./auth-store";
@@ -44,6 +44,17 @@ test("auth.json is written owner-only (0600) inside a 0700 directory", async () 
 
   expect(statSync(path).mode & 0o777).toBe(0o600);
   expect(statSync(dirname(path)).mode & 0o777).toBe(0o700);
+});
+
+test("tightens an already-existing parent directory to 0700", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aimdware-authdir-"));
+  tmpDirs.push(dir);
+  chmodSync(dir, 0o755); // simulate a pre-existing, loosely-permissioned cache dir
+  const store = createFileAuthStore(join(dir, "auth.json"));
+
+  await store.set("codex", { type: "oauth", refresh: "secret", expires: 0 });
+
+  expect(statSync(dir).mode & 0o777).toBe(0o700);
 });
 
 test("concurrent set calls do not lose provider entries", async () => {

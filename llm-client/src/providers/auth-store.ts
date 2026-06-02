@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { chmod, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { writeAtomic } from "../util";
 import type { ProviderId } from "./plugin";
@@ -44,7 +44,12 @@ export function createFileAuthStore(path: string): AuthStore {
   function mutate(transform: (file: AuthFile) => AuthFile): Promise<void> {
     const run = writeChain.then(async () => {
       const next = transform(await readAll());
-      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+      const dir = dirname(path);
+      await mkdir(dir, { recursive: true, mode: 0o700 });
+      // mkdir's mode only applies to dirs it creates; tighten an existing one
+      // (e.g. a cache dir made earlier with default perms) so the credential
+      // file's directory is never group/world-traversable.
+      await chmod(dir, 0o700);
       await writeAtomic(path, new TextEncoder().encode(JSON.stringify(next)), {
         mode: 0o600,
       });

@@ -1,4 +1,4 @@
-import { rename, chmod } from "node:fs/promises";
+import { rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
@@ -18,9 +18,10 @@ export function sessionBlobPath(cacheDir: string, session_id: string): string {
  * On POSIX, rename is atomic on the same filesystem. A crash mid-write leaves
  * a stray temp file (cleaned up next sweep) but never a corrupted target.
  *
- * Caller must ensure the destination directory exists. Pass `mode` to fix the
- * file's permission bits (applied to the temp file before the rename, so the
- * target is never briefly world-readable) — used for credential files.
+ * Caller must ensure the destination directory exists. Pass `mode` to set the
+ * file's permission bits: the temp file is *created* with that mode (not
+ * chmod'd after), so a credential never exists on disk with default,
+ * world-readable perms even briefly.
  */
 export async function writeAtomic(
   path: string,
@@ -28,8 +29,11 @@ export async function writeAtomic(
   opts?: { mode?: number },
 ): Promise<void> {
   const tmp = `${path}.tmp.${crypto.randomUUID()}`;
-  await Bun.write(tmp, data);
-  if (opts?.mode !== undefined) await chmod(tmp, opts.mode);
+  if (opts?.mode !== undefined) {
+    await writeFile(tmp, data, { mode: opts.mode });
+  } else {
+    await Bun.write(tmp, data);
+  }
   await rename(tmp, path);
 }
 
