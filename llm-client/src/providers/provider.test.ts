@@ -38,7 +38,7 @@ function restoreProxyEnv(
 }
 
 function authStore(initial: ProviderAuth): AuthStore {
-  let value = initial;
+  let value: ProviderAuth | undefined = initial;
   return {
     async get(id) {
       expect(["codex", "copilot"]).toContain(id);
@@ -46,6 +46,9 @@ function authStore(initial: ProviderAuth): AuthStore {
     },
     async set(_id, next) {
       value = next;
+    },
+    async del(_id) {
+      value = undefined;
     },
   };
 }

@@ -19,6 +19,7 @@ export type ProviderAuth = OAuthAuth;
 export type AuthStore = {
   get(id: ProviderId): Promise<ProviderAuth | undefined>;
   set(id: ProviderId, auth: ProviderAuth): Promise<void>;
+  del(id: ProviderId): Promise<void>;
 };
 
 type AuthFile = {
@@ -35,21 +36,39 @@ export function createFileAuthStore(path: string): AuthStore {
     }
   }
 
+  // Serialize mutations through a promise chain: set/del are read-modify-write,
+  // so concurrent callers would otherwise race on readAll() and clobber each
+  // other's provider entry. A failed write must not break the chain for later
+  // writers, hence the `.catch`.
+  let writeChain: Promise<void> = Promise.resolve();
+  function mutate(transform: (file: AuthFile) => AuthFile): Promise<void> {
+    const run = writeChain.then(async () => {
+      const next = transform(await readAll());
+      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+      await writeAtomic(path, new TextEncoder().encode(JSON.stringify(next)), {
+        mode: 0o600,
+      });
+    });
+    writeChain = run.catch(() => {});
+    return run;
+  }
+
   return {
     async get(id) {
       return (await readAll()).providers?.[id];
     },
-    async set(id, auth) {
-      const file = await readAll();
-      const next: AuthFile = {
+    set(id, auth) {
+      return mutate((file) => ({
         ...file,
-        providers: {
-          ...file.providers,
-          [id]: auth,
-        },
-      };
-      await mkdir(dirname(path), { recursive: true });
-      await writeAtomic(path, new TextEncoder().encode(JSON.stringify(next)));
+        providers: { ...file.providers, [id]: auth },
+      }));
+    },
+    del(id) {
+      return mutate((file) => {
+        const providers = { ...file.providers };
+        delete providers[id];
+        return { ...file, providers };
+      });
     },
   };
 }

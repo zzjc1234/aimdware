@@ -40,6 +40,7 @@ const loggedInCodexStore: AuthStore = {
     };
   },
   async set() {},
+  async del() {},
 };
 
 test("GET /healthz returns 200 ok", async () => {

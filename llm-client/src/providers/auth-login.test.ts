@@ -46,6 +46,9 @@ function memoryStore(): AuthStore & { values: Map<string, ProviderAuth> } {
     async set(id, auth) {
       values.set(id, auth);
     },
+    async del(id) {
+      values.delete(id);
+    },
   };
 }
 
