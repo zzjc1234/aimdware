@@ -1,0 +1,32 @@
+name: codex-auth-concurrency
+
+# Heavy: spawns multiple real processes that contend on one credential file.
+# Runs only when a pushed commit's message contains "[lock]", or on manual
+# dispatch — not on every push.
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  concurrency:
+    if: ${{ contains(github.event.head_commit.message, '[lock]') || github.event_name == 'workflow_dispatch' }}
+    # Adjust to a label your Gitea Act runner advertises if it isn't ubuntu-latest.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
+      - name: Install llm-client dependencies
+        working-directory: llm-client
+        run: bun install --frozen-lockfile
+
+      - name: Cross-process codex refresh concurrency test
+        env:
+          CONC_PROCESSES: "8"
+          CONC_RUNS: "3"
+        run: bun run test-scripts/concurrency/run.ts
