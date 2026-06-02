@@ -1,8 +1,8 @@
 import { test, expect, afterEach } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { createFileAuthStore } from "./auth-store";
+import { authFilePath, createFileAuthStore } from "./auth-store";
 
 const tmpDirs: string[] = [];
 function freshAuthPath(): string {
@@ -55,6 +55,22 @@ test("tightens an already-existing parent directory to 0700", async () => {
   await store.set("codex", { type: "oauth", refresh: "secret", expires: 0 });
 
   expect(statSync(dir).mode & 0o777).toBe(0o700);
+});
+
+test("does not alter the shared cache directory that holds other state", async () => {
+  // Mirror main.ts: cacheDir holds records/ + queue.db alongside the auth file.
+  const cacheDir = mkdtempSync(join(tmpdir(), "aimdware-cache-"));
+  tmpDirs.push(cacheDir);
+  chmodSync(cacheDir, 0o755);
+  mkdirSync(join(cacheDir, "records"));
+
+  const store = createFileAuthStore(authFilePath(cacheDir));
+  await store.set("codex", { type: "oauth", refresh: "secret", expires: 0 });
+
+  // The shared cache dir must be left untouched; only the credential's own
+  // directory is locked to 0700.
+  expect(statSync(cacheDir).mode & 0o777).toBe(0o755);
+  expect(statSync(dirname(authFilePath(cacheDir))).mode & 0o777).toBe(0o700);
 });
 
 test("concurrent set calls do not lose provider entries", async () => {

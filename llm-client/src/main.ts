@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { loadConfig, type Config } from "./config";
 import { createHandler } from "./http/handler";
 import { startServer } from "./http/server";
-import { createFileAuthStore } from "./providers/auth-store";
+import { authFilePath, createFileAuthStore } from "./providers/auth-store";
 import type { AuthStore } from "./providers/auth-store";
 import { loginCodexDevice, loginCopilotDevice } from "./providers/auth-login";
 import { createProvider } from "./providers";
@@ -211,7 +211,7 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
   const cacheDir = expandHome(config.local_cache_dir);
   await mkdir(join(cacheDir, "records"), { recursive: true });
   const queueDb = join(cacheDir, "queue.db");
-  const authStore = createFileAuthStore(join(cacheDir, "auth.json"));
+  const authStore = createFileAuthStore(authFilePath(cacheDir));
 
   try {
     if (
@@ -329,7 +329,7 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
     console.log(`  upstream url: ${config.upstream.base_url}`);
     console.log(`  upstream key: ${redactToken(config.upstream.api_key)}`);
   } else {
-    console.log(`  upstream auth: ${join(cacheDir, "auth.json")}`);
+    console.log(`  upstream auth: ${authFilePath(cacheDir)}`);
   }
   console.log(`  student token: ${redactToken(config.student_token)}`);
   console.log(`  course:      ${config.course}`);

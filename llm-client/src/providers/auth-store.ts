@@ -1,5 +1,5 @@
 import { chmod, mkdir, readFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { writeAtomic } from "../util";
 import type { ProviderId } from "./plugin";
 
@@ -25,6 +25,17 @@ export type AuthStore = {
 type AuthFile = {
   providers?: Partial<Record<ProviderId, ProviderAuth>>;
 };
+
+/**
+ * Location of the credential file given the router's cache dir.
+ *
+ * Credentials live in their own subdirectory so the store can lock it to 0700
+ * without touching the shared cache dir (which also holds records/ + queue.db,
+ * may be a symlink, or may not be owned by this user).
+ */
+export function authFilePath(cacheDir: string): string {
+  return join(cacheDir, "auth", "auth.json");
+}
 
 export function createFileAuthStore(path: string): AuthStore {
   async function readAll(): Promise<AuthFile> {
