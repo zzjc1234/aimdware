@@ -210,7 +210,14 @@ async function currentAuth(
   // refresh completed must pick up the rotated token rather than refresh again
   // with the now-invalid one.
   if (gate.inFlight) return gate.inFlight;
-  gate.inFlight = (async () => {
+  // Cross-process critical section: when several routers share one cache, only
+  // one refreshes at a time. The loser, once it acquires the lock, re-reads
+  // (below) and finds the freshly-rotated token, so it never refreshes a
+  // spent one. Stores with no shared backing run the body directly.
+  const withLock =
+    opts.authStore.withLock?.bind(opts.authStore) ??
+    (<T>(fn: () => Promise<T>): Promise<T> => fn());
+  const refresh = async (): Promise<OAuthAuth> => {
     let usedRefresh = "";
     try {
       const auth = await readAuth();
@@ -256,6 +263,11 @@ async function currentAuth(
         }
       }
       throw e;
+    }
+  };
+  gate.inFlight = (async () => {
+    try {
+      return await withLock(refresh);
     } finally {
       gate.inFlight = null;
     }

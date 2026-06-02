@@ -1,5 +1,13 @@
 import { test, expect, afterEach } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { authFilePath, createFileAuthStore } from "./auth-store";
@@ -71,6 +79,45 @@ test("does not alter the shared cache directory that holds other state", async (
   // directory is locked to 0700.
   expect(statSync(cacheDir).mode & 0o777).toBe(0o755);
   expect(statSync(dirname(authFilePath(cacheDir))).mode & 0o777).toBe(0o700);
+});
+
+test("withLock serializes concurrent critical sections and returns the result", async () => {
+  const store = createFileAuthStore(freshAuthPath(), { lockPollMs: 5 });
+  const order: string[] = [];
+  const section = (tag: string) =>
+    store.withLock!(async () => {
+      order.push(`${tag}-start`);
+      await new Promise((r) => setTimeout(r, 20));
+      order.push(`${tag}-end`);
+      return tag;
+    });
+
+  const results = await Promise.all([section("A"), section("B")]);
+
+  expect(results.sort()).toEqual(["A", "B"]);
+  // The two sections must not interleave: whoever starts first also ends
+  // before the other starts.
+  expect(order[1]).toBe(`${order[0]![0]}-end`);
+});
+
+test("withLock steals a stale lock left behind by a crashed process", async () => {
+  const path = freshAuthPath();
+  const lockPath = `${path}.lock`;
+  mkdirSync(dirname(lockPath), { recursive: true });
+  writeFileSync(lockPath, "");
+  const longAgo = new Date(Date.now() - 120_000);
+  utimesSync(lockPath, longAgo, longAgo);
+  const store = createFileAuthStore(path, {
+    lockStaleMs: 30_000,
+    lockPollMs: 5,
+  });
+
+  let ran = false;
+  await store.withLock!(async () => {
+    ran = true;
+  });
+
+  expect(ran).toBe(true);
 });
 
 test("concurrent set calls do not lose provider entries", async () => {

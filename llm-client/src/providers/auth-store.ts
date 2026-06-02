@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, stat, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { writeAtomic } from "../util";
 import type { ProviderId } from "./plugin";
@@ -20,6 +20,11 @@ export type AuthStore = {
   get(id: ProviderId): Promise<ProviderAuth | undefined>;
   set(id: ProviderId, auth: ProviderAuth): Promise<void>;
   del(id: ProviderId): Promise<void>;
+  // Run `fn` while holding a cross-process lock on the credential store, so a
+  // read-modify-write (e.g. a token refresh) is atomic across router processes
+  // sharing the same cache. Optional: stores with no shared backing (in-memory
+  // test doubles) need no lock and may omit it.
+  withLock?<T>(fn: () => Promise<T>): Promise<T>;
 };
 
 type AuthFile = {
@@ -37,7 +42,14 @@ export function authFilePath(cacheDir: string): string {
   return join(cacheDir, "auth", "auth.json");
 }
 
-export function createFileAuthStore(path: string): AuthStore {
+export function createFileAuthStore(
+  path: string,
+  opts?: { lockStaleMs?: number; lockPollMs?: number },
+): AuthStore {
+  const lockPath = `${path}.lock`;
+  const lockStaleMs = opts?.lockStaleMs ?? 30_000;
+  const lockPollMs = opts?.lockPollMs ?? 50;
+
   async function readAll(): Promise<AuthFile> {
     try {
       return JSON.parse(await readFile(path, "utf-8")) as AuthFile;
@@ -86,5 +98,39 @@ export function createFileAuthStore(path: string): AuthStore {
         return { ...file, providers };
       });
     },
+    async withLock(fn) {
+      await acquireLock();
+      try {
+        return await fn();
+      } finally {
+        await unlink(lockPath).catch(() => {});
+      }
+    },
   };
+
+  // Cross-process mutex via an exclusive-create lock file. A holder that
+  // crashed leaves the file behind; the next acquirer reclaims it once the
+  // file is older than `lockStaleMs`.
+  async function acquireLock(): Promise<void> {
+    while (true) {
+      try {
+        await mkdir(dirname(lockPath), { recursive: true, mode: 0o700 });
+        const handle = await open(lockPath, "wx", 0o600);
+        await handle.close();
+        return;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        try {
+          const st = await stat(lockPath);
+          if (Date.now() - st.mtimeMs > lockStaleMs) {
+            await unlink(lockPath).catch(() => {});
+            continue;
+          }
+        } catch {
+          continue; // lock vanished between open and stat; retry immediately
+        }
+        await new Promise((r) => setTimeout(r, lockPollMs));
+      }
+    }
+  }
 }
