@@ -191,18 +191,29 @@ async function currentAuth(
   const now = opts.now ?? Date.now;
   const fetchImpl =
     opts.fetchImpl ?? (fetch as unknown as ProviderFetchOpts["fetchImpl"]);
-  const auth = await opts.authStore.get("codex");
-  if (!auth || auth.type !== "oauth") {
-    throw new Error(`Codex subscription is not logged in. ${REAUTH_HINT}`);
-  }
+  const readAuth = async (): Promise<OAuthAuth> => {
+    const auth = await opts.authStore.get("codex");
+    if (!auth || auth.type !== "oauth") {
+      throw new Error(`Codex subscription is not logged in. ${REAUTH_HINT}`);
+    }
+    return auth;
+  };
+  const isFresh = (auth: OAuthAuth): boolean =>
+    Boolean(auth.access) && auth.expires > now() + EXPIRY_SKEW_MS;
 
-  if (auth.access && auth.expires > now() + EXPIRY_SKEW_MS) return auth;
+  const cached = await readAuth();
+  if (isFresh(cached)) return cached;
 
   // Single-flight: concurrent expired requests share one refresh, so a rotated
-  // refresh token is fetched and persisted exactly once.
+  // refresh token is fetched and persisted exactly once. The gated body
+  // re-reads the store first — a request that arrives just after another
+  // refresh completed must pick up the rotated token rather than refresh again
+  // with the now-invalid one.
   if (gate.inFlight) return gate.inFlight;
   gate.inFlight = (async () => {
     try {
+      const auth = await readAuth();
+      if (isFresh(auth)) return auth;
       const tokens = await refreshAccessToken(auth.refresh, {
         now,
         fetchImpl: fetchImpl!,

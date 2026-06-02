@@ -343,6 +343,48 @@ test("codex refresh is single-flight under concurrent expired requests", async (
   expect(refreshCalls).toBe(1);
 });
 
+test("codex re-reads inside the refresh gate and skips a redundant refresh when another request already rotated the token", async () => {
+  // Simulates the production race: the outer read sees a stale/expired token,
+  // but by the time this request refreshes, another request has already
+  // rotated and persisted a fresh one. The gate body must re-read and use it
+  // rather than refresh again with the now-invalid refresh token.
+  const NOW = 1_000_000;
+  let gets = 0;
+  const store: AuthStore = {
+    async get() {
+      gets++;
+      return gets === 1
+        ? { type: "oauth", access: "stale", refresh: "R1", expires: 1 }
+        : {
+            type: "oauth",
+            access: "rotated-by-other",
+            refresh: "R2",
+            expires: NOW + 600_000,
+          };
+    },
+    async set() {},
+    async del() {},
+  };
+  let refreshCalls = 0;
+  const refreshFetch: FetchLike = async () => {
+    refreshCalls++;
+    return jsonResponse({
+      access_token: "should-not-be-used",
+      refresh_token: "z",
+      expires_in: 3600,
+    });
+  };
+
+  const prepared = await createCodexProvider({
+    authStore: store,
+    fetchImpl: refreshFetch,
+    now: () => NOW,
+  }).prepareResponses(responsesInput());
+
+  expect(refreshCalls).toBe(0);
+  expect(prepared.headers.get("authorization")).toBe("Bearer rotated-by-other");
+});
+
 test("codex refreshes when the token is within the 60s expiry skew window", async () => {
   const store = authStore({
     type: "oauth",
