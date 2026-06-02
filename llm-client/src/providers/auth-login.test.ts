@@ -147,6 +147,103 @@ test("loginCodexDevice sends auth requests through HTTPS_PROXY", async () => {
   ]);
 });
 
+test("loginCodexDevice sends a User-Agent on the oauth token exchange", async () => {
+  const store = memoryStore();
+  let tokenExchangeUA: string | null = null;
+  const fetchImpl: FetchLike = async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/api/accounts/deviceauth/usercode")) {
+      return Response.json({
+        device_auth_id: "device-id",
+        user_code: "ABCD-EFGH",
+        interval: "1",
+      });
+    }
+    if (url.endsWith("/api/accounts/deviceauth/token")) {
+      return Response.json({
+        authorization_code: "auth-code",
+        code_verifier: "verifier",
+      });
+    }
+    tokenExchangeUA = new Headers(init?.headers).get("user-agent");
+    return Response.json({
+      access_token: "codex-access",
+      refresh_token: "codex-refresh",
+      expires_in: 3600,
+    });
+  };
+
+  await loginCodexDevice({
+    authStore: store,
+    fetchImpl,
+    sleep: async () => {},
+    notify: () => {},
+  });
+
+  expect(tokenExchangeUA).not.toBeNull();
+});
+
+test("loginCodexDevice rejects a token response missing access_token", async () => {
+  const store = memoryStore();
+  const fetchImpl: FetchLike = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/api/accounts/deviceauth/usercode")) {
+      return Response.json({
+        device_auth_id: "device-id",
+        user_code: "ABCD-EFGH",
+        interval: "1",
+      });
+    }
+    if (url.endsWith("/api/accounts/deviceauth/token")) {
+      return Response.json({
+        authorization_code: "auth-code",
+        code_verifier: "verifier",
+      });
+    }
+    return Response.json({ refresh_token: "codex-refresh", expires_in: 3600 });
+  };
+
+  await expect(
+    loginCodexDevice({
+      authStore: store,
+      fetchImpl,
+      sleep: async () => {},
+      notify: () => {},
+    }),
+  ).rejects.toThrow(/access_token/);
+  expect(store.values.get("codex")).toBeUndefined();
+});
+
+test("loginCodexDevice gives up once the device code expires instead of polling forever", async () => {
+  const store = memoryStore();
+  let clock = 0;
+  const fetchImpl: FetchLike = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/api/accounts/deviceauth/usercode")) {
+      return Response.json({
+        device_auth_id: "device-id",
+        user_code: "ABCD-EFGH",
+        interval: "1",
+        expires_in: 2,
+      });
+    }
+    // token endpoint never authorizes (always pending)
+    return new Response("", { status: 403 });
+  };
+
+  await expect(
+    loginCodexDevice({
+      authStore: store,
+      fetchImpl,
+      sleep: async () => {
+        clock += 1000;
+      },
+      now: () => clock,
+      notify: () => {},
+    }),
+  ).rejects.toThrow(/auth login codex/);
+});
+
 test("loginCopilotDevice stores GitHub Copilot oauth credentials", async () => {
   const store = memoryStore();
   const prompts: string[] = [];

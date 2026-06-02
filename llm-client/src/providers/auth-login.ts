@@ -1,6 +1,6 @@
 import type { FetchLike } from "../http/proxy";
 import type { AuthStore, OAuthAuth } from "./auth-store";
-import { extractCodexAccountId } from "./codex";
+import { extractCodexAccountId, parseTokenResponse } from "./codex";
 import { fetchWithProxy, userAgent } from "./plugin";
 
 const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -14,12 +14,6 @@ type LoginOpts = {
   sleep?: (ms: number) => Promise<void>;
   notify?: (line: string) => void;
   now?: () => number;
-};
-
-type CodexTokenResponse = {
-  access_token: string;
-  refresh_token: string;
-  expires_in?: number;
 };
 
 function defaults(opts: LoginOpts): Required<LoginOpts> {
@@ -58,12 +52,23 @@ export async function loginCodexDevice(opts: LoginOpts): Promise<OAuthAuth> {
     device_auth_id: string;
     user_code: string;
     interval: string;
+    expires_in?: number | string;
   };
   const interval = Math.max(Number.parseInt(deviceData.interval) || 5, 1);
+  const ttlSeconds = Number(deviceData.expires_in);
+  const deadlineMs =
+    (Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : 900) * 1000;
+  const startedAt = d.now();
   d.notify(`Open ${CODEX_ISSUER}/codex/device`);
   d.notify(`Enter code: ${deviceData.user_code}`);
 
   while (true) {
+    if (d.now() - startedAt >= deadlineMs) {
+      throw new Error(
+        "Codex device authorization expired before it was approved. " +
+          "Re-run `aimdware-router auth login codex`.",
+      );
+    }
     const response = await fetchWithProxy(
       d.fetchImpl,
       `${CODEX_ISSUER}/api/accounts/deviceauth/token`,
@@ -90,7 +95,10 @@ export async function loginCodexDevice(opts: LoginOpts): Promise<OAuthAuth> {
         `${CODEX_ISSUER}/oauth/token`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": userAgent(),
+          },
           body: new URLSearchParams({
             grant_type: "authorization_code",
             code: code.authorization_code,
@@ -103,7 +111,7 @@ export async function loginCodexDevice(opts: LoginOpts): Promise<OAuthAuth> {
       if (!tokenResponse.ok) {
         throw new Error(`Codex token exchange failed: ${tokenResponse.status}`);
       }
-      const tokens = (await tokenResponse.json()) as CodexTokenResponse;
+      const tokens = parseTokenResponse(await tokenResponse.json());
       const auth: OAuthAuth = {
         type: "oauth",
         access: tokens.access_token,
