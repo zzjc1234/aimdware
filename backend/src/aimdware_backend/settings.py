@@ -6,7 +6,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="AIMDWARE_", case_sensitive=False)
+    # Values come from process env vars (AIMDWARE_*) and, if present, a `.env`
+    # file in the working directory. Real env vars take precedence over `.env`.
+    model_config = SettingsConfigDict(
+        env_prefix="AIMDWARE_",
+        case_sensitive=False,
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     database_url: str = "sqlite:///./aimdware.db"
 
