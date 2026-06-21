@@ -48,8 +48,8 @@ upstream:
   plugin: codex # or copilot
 ```
 
-The subscription tokens are stored in `local_cache_dir/auth.json`, not
-in `aimdware.yaml`.
+The subscription tokens are stored in `local_cache_dir/auth/auth.json`
+(a dedicated 0700 dir, file 0600), not in `aimdware.yaml`.
 
 ## API surface
 
@@ -73,7 +73,7 @@ Responses endpoint.
 |---|---|---|
 | `student_token` | `aimdware.yaml`, mode 600 | POST to backend `/ingest/*` |
 | `upstream.api_key` | same file, only for `plugin: openai` | call the student's chosen LLM provider |
-| subscription OAuth tokens | `local_cache_dir/auth.json`, only for `plugin: codex/copilot` | call that student's subscription provider |
+| subscription OAuth tokens | `local_cache_dir/auth/auth.json`, only for `plugin: codex/copilot` | call that student's subscription provider |
 | `tbox_user`/`tbox_pass` | same file | PUT to the student's chosen WebDAV |
 | **NOT held**: backend admin secret, TT credentials, other students' data |
 

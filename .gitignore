@@ -10,3 +10,4 @@ test-functional/opencode.json
 
 # Personal runbook — do not commit
 AGENT.md
+.claude/
