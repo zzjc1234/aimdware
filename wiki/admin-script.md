@@ -22,6 +22,7 @@ the backend host. Course-scoped admin role enforcement is deferred.
 
 ```
 aimdware-admin user create   --jaccount alice --email a@sjtu.edu.cn --name "Alice Liu"
+aimdware-admin user create   --jaccount alice --name "Alice Liu" --student-id 5190100001  # email derived
 aimdware-admin user list
 
 aimdware-admin course create --code ECE4721J --title "Intro to Systems" --semester 2026-spring
@@ -35,6 +36,34 @@ aimdware-admin token list    [--user alice]
 
 aimdware-admin record list   [--course X] [--user X] [--assignment X] [--status pending|uploaded|...] [--limit N]
 aimdware-admin record payload --id <record_id>     # fetch blob from Tbox + verify sha256
+```
+
+### Batch over a roster CSV
+
+`user create`, `enroll`, `token issue`, and `token revoke` accept `--csv`
+to operate over a whole roster in one go. The CSV is `名字,学号,jaccount`
+(name, student_id, jaccount) in UTF-8; a header row and blank lines are
+skipped, and only `jaccount` is strictly required per row.
+
+```
+aimdware-admin user create  --csv roster.csv [--email-domain sjtu.edu.cn]
+aimdware-admin enroll        --csv roster.csv --course ECE4721J [--role student]
+aimdware-admin token issue   --csv roster.csv      # prints jaccount + plaintext + prefix per row
+aimdware-admin token revoke  --csv roster.csv      # revokes ALL active tokens per jaccount
+```
+
+`user create --csv` derives each email as `<jaccount>@<domain>` (default
+`sjtu.edu.cn`, override with `--email-domain`) and stores `学号` in the
+user's `student_id`. Batch commands process rows independently, continue
+past per-row failures, print a JSON array of `{jaccount, status, …}`
+(status ∈ created/exists/enrolled/issued/revoked/error), and exit
+non-zero if any row errored — so a wrapper script can detect partial
+failure. Typical token rollout:
+
+```bash
+aimdware-admin user create --csv roster.csv
+aimdware-admin enroll      --csv roster.csv --course ECE4721J
+aimdware-admin token issue --csv roster.csv > tokens.json   # distribute per jaccount
 ```
 
 All commands print JSON to stdout (newline-indented) so scripts can

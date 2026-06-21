@@ -202,6 +202,18 @@ uv run aimdware-admin token issue --user alice
 Give Alice four values for her `aimdware.yaml`: the **plaintext token**,
 your `backend_url`, `course=DEMO101`, `assignment=demo1`.
 
+**Whole class at once?** Put the roster in a `名字,学号,jaccount` CSV and use
+the `--csv` batch forms (email is derived `<jaccount>@sjtu.edu.cn`, 学号 stored
+as `student_id`):
+
+```bash
+uv run aimdware-admin user create --csv roster.csv
+uv run aimdware-admin enroll      --csv roster.csv --course DEMO101
+uv run aimdware-admin token issue --csv roster.csv > tokens.json   # jaccount→plaintext, distribute
+```
+
+See [admin-script.md](admin-script.md) for the batch output format.
+
 > **Assignments need no setup.** `assignment` is a free-form course-scoped
 > string checked by equality at ingest — `demo1` "exists" the moment a
 > record arrives with it. Just agree on the slug

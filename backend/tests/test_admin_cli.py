@@ -10,14 +10,21 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from aimdware_backend import settings
 from aimdware_backend.admin_cli import (
     _schema_exists,
+    batch_enroll,
+    batch_token_issue,
+    batch_token_revoke,
+    batch_user_create,
     course_create,
+    derive_email,
     enroll,
+    revoke_tokens_for_user,
     token_issue,
     token_revoke,
     user_create,
     user_get,
 )
 from aimdware_backend.models import Course, Enrollment, Role, StudentToken, User
+from aimdware_backend.roster import RosterRow
 
 
 def test_user_create_adds_row(session: Session) -> None:
@@ -131,3 +138,98 @@ def test_schema_probe_rejects_legacy_create_all_schema() -> None:
     engine = create_engine("sqlite://")
     SQLModel.metadata.create_all(engine)
     assert _schema_exists(engine) is False
+
+
+# --- student_id + email derivation ---------------------------------------
+
+
+def test_user_create_stores_student_id(session: Session) -> None:
+    u = user_create(session, jaccount="x", email="x@e", display_name="X", student_id="5190100009")
+    assert u.student_id == "5190100009"
+
+
+def test_user_create_student_id_defaults_none(session: Session) -> None:
+    u = user_create(session, jaccount="y", email="y@e", display_name="Y")
+    assert u.student_id is None
+
+
+def test_derive_email_from_jaccount() -> None:
+    assert derive_email("alice") == "alice@sjtu.edu.cn"
+    assert derive_email("bob", domain="example.edu") == "bob@example.edu"
+
+
+# --- batch (CSV) operations -----------------------------------------------
+
+
+def test_batch_user_create_inserts_with_derived_email_and_student_id(
+    session: Session,
+) -> None:
+    rows = [
+        RosterRow(name="张三", student_id="5190100001", jaccount="zhangsan"),
+        RosterRow(name="李四", student_id="5190100002", jaccount="lisi"),
+    ]
+    res = batch_user_create(session, rows)
+    assert [r["status"] for r in res] == ["created", "created"]
+    z = user_get(session, "zhangsan")
+    assert z.email == "zhangsan@sjtu.edu.cn"
+    assert z.student_id == "5190100001"
+    assert z.display_name == "张三"
+
+
+def test_batch_user_create_existing_jaccount_is_exists_not_error(
+    session: Session,
+) -> None:
+    user_create(session, jaccount="dup", email="dup@sjtu.edu.cn", display_name="Dup")
+    res = batch_user_create(session, [RosterRow(name="Dup", student_id="5", jaccount="dup")])
+    assert res[0]["status"] == "exists"
+
+
+def test_batch_enroll_enrolls_then_reports_exists(session: Session) -> None:
+    course_create(session, code="C1", title="t", semester="s")
+    user_create(session, jaccount="a1", email="a1@e", display_name="A1")
+    row = RosterRow(name="A1", student_id="5", jaccount="a1")
+    assert (
+        batch_enroll(session, [row], course_code="C1", role=Role.student)[0]["status"] == "enrolled"
+    )
+    assert (
+        batch_enroll(session, [row], course_code="C1", role=Role.student)[0]["status"] == "exists"
+    )
+
+
+def test_batch_enroll_missing_user_is_error(session: Session) -> None:
+    course_create(session, code="C2", title="t", semester="s")
+    res = batch_enroll(
+        session,
+        [RosterRow(name="Ghost", student_id="5", jaccount="ghost")],
+        course_code="C2",
+        role=Role.student,
+    )
+    assert res[0]["status"] == "error"
+    assert "error" in res[0]
+
+
+def test_batch_token_issue_returns_plaintext_and_prefix(session: Session) -> None:
+    user_create(session, jaccount="t1", email="t1@e", display_name="T1")
+    res = batch_token_issue(session, [RosterRow(name="T1", student_id="5", jaccount="t1")])
+    assert res[0]["status"] == "issued"
+    assert res[0]["plaintext"].startswith("st_")
+    assert res[0]["prefix"] == res[0]["plaintext"][:8]
+
+
+def test_revoke_tokens_for_user_revokes_all_active(session: Session) -> None:
+    user_create(session, jaccount="r1", email="r1@e", display_name="R1")
+    token_issue(session, jaccount="r1")
+    n = revoke_tokens_for_user(session, "r1")
+    assert n == 1
+    active = session.exec(
+        select(StudentToken).where(StudentToken.revoked_at.is_(None))  # type: ignore[union-attr]
+    ).all()
+    assert active == []
+
+
+def test_batch_token_revoke_reports_count(session: Session) -> None:
+    user_create(session, jaccount="r2", email="r2@e", display_name="R2")
+    token_issue(session, jaccount="r2")
+    res = batch_token_revoke(session, [RosterRow(name="R2", student_id="5", jaccount="r2")])
+    assert res[0]["status"] == "revoked"
+    assert res[0]["revoked"] == 1

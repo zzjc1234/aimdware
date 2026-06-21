@@ -47,6 +47,10 @@ class User(SQLModel, table=True):
     display_name: str
     email: str = Field(unique=True, index=True)
     jaccount: str = Field(unique=True, index=True)
+    # Roster 学号. Nullable and NOT unique: imports may carry blanks, and we
+    # don't want a stray duplicate to fail the whole batch. jaccount remains
+    # the identity; student_id is carried for the TT's cross-referencing.
+    student_id: str | None = Field(default=None)
     is_active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=utcnow)
 

@@ -39,13 +39,34 @@ from aimdware_backend.models import (
     User,
     utcnow,
 )
+from aimdware_backend.roster import RosterRow, read_roster
 
 # --- importable command functions (also covered by tests) ---------------
 
 
-def user_create(session: Session, *, jaccount: str, email: str, display_name: str) -> User:
+DEFAULT_EMAIL_DOMAIN = "sjtu.edu.cn"
+
+
+def derive_email(jaccount: str, domain: str = DEFAULT_EMAIL_DOMAIN) -> str:
+    """SJTU jaccount is the email local-part, so derive it deterministically."""
+    return f"{jaccount}@{domain}"
+
+
+def user_create(
+    session: Session,
+    *,
+    jaccount: str,
+    email: str,
+    display_name: str,
+    student_id: str | None = None,
+) -> User:
     """Create a new User row and return it."""
-    user = User(jaccount=jaccount, email=email, display_name=display_name)
+    user = User(
+        jaccount=jaccount,
+        email=email,
+        display_name=display_name,
+        student_id=student_id,
+    )
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -140,6 +161,109 @@ def token_revoke(session: Session, *, prefix: str) -> int:
     return len(rows)
 
 
+def revoke_tokens_for_user(session: Session, jaccount: str) -> int:
+    """Revoke ALL active tokens for a user (by jaccount). Returns count."""
+    user = user_get(session, jaccount)
+    rows = session.exec(
+        select(StudentToken)
+        .where(StudentToken.user_id == user.id)
+        .where(StudentToken.revoked_at.is_(None))  # type: ignore[union-attr]
+    ).all()
+    for r in rows:
+        r.revoked_at = utcnow()
+        session.add(r)
+    session.commit()
+    return len(rows)
+
+
+# --- batch (CSV) operations ---------------------------------------------
+#
+# Each runs one roster row at a time, continues past per-row failures, and
+# returns a list of result dicts: {"jaccount", "status", ...}. Status values:
+# created/exists/enrolled/issued/revoked/error. The caller decides the exit
+# code from whether any row is "error".
+
+
+def batch_user_create(
+    session: Session,
+    rows: list[RosterRow],
+    *,
+    email_domain: str = DEFAULT_EMAIL_DOMAIN,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            if session.exec(select(User).where(User.jaccount == row.jaccount)).first():
+                out.append({"jaccount": row.jaccount, "status": "exists"})
+                continue
+            u = user_create(
+                session,
+                jaccount=row.jaccount,
+                email=derive_email(row.jaccount, email_domain),
+                display_name=row.name,
+                student_id=row.student_id,
+            )
+            out.append({"jaccount": row.jaccount, "status": "created", "email": u.email})
+        except Exception as e:  # noqa: BLE001 - per-row isolation; report and continue
+            session.rollback()
+            out.append({"jaccount": row.jaccount, "status": "error", "error": str(e)})
+    return out
+
+
+def batch_enroll(
+    session: Session,
+    rows: list[RosterRow],
+    *,
+    course_code: str,
+    role: Role = Role.student,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            user = user_get(session, row.jaccount)
+            course = course_get(session, course_code)
+            if session.get(Enrollment, (user.id, course.id)) is not None:
+                out.append({"jaccount": row.jaccount, "status": "exists"})
+                continue
+            enroll(session, jaccount=row.jaccount, course_code=course_code, role=role)
+            out.append({"jaccount": row.jaccount, "status": "enrolled"})
+        except Exception as e:  # noqa: BLE001 - per-row isolation; report and continue
+            session.rollback()
+            out.append({"jaccount": row.jaccount, "status": "error", "error": str(e)})
+    return out
+
+
+def batch_token_issue(session: Session, rows: list[RosterRow]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            tok, plaintext = token_issue(session, jaccount=row.jaccount)
+            out.append(
+                {
+                    "jaccount": row.jaccount,
+                    "status": "issued",
+                    "plaintext": plaintext,
+                    "prefix": tok.prefix,
+                }
+            )
+        except Exception as e:  # noqa: BLE001 - per-row isolation; report and continue
+            session.rollback()
+            out.append({"jaccount": row.jaccount, "status": "error", "error": str(e)})
+    return out
+
+
+def batch_token_revoke(session: Session, rows: list[RosterRow]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            n = revoke_tokens_for_user(session, row.jaccount)
+            out.append({"jaccount": row.jaccount, "status": "revoked", "revoked": n})
+        except Exception as e:  # noqa: BLE001 - per-row isolation; report and continue
+            session.rollback()
+            out.append({"jaccount": row.jaccount, "status": "error", "error": str(e)})
+    return out
+
+
 # --- output helpers -----------------------------------------------------
 
 
@@ -147,17 +271,40 @@ def _print_json(obj: Any) -> None:
     print(json.dumps(obj, default=str, indent=2))
 
 
+def _emit_batch(results: list[dict[str, Any]]) -> int:
+    """Print batch results and return a non-zero code if any row errored."""
+    _print_json(results)
+    return 1 if any(r.get("status") == "error" for r in results) else 0
+
+
 # --- CLI command dispatchers --------------------------------------------
 
 
-def _cmd_user_create(session: Session, args: argparse.Namespace) -> None:
+def _cmd_user_create(session: Session, args: argparse.Namespace) -> int:
+    if args.csv:
+        return _emit_batch(
+            batch_user_create(session, read_roster(args.csv), email_domain=args.email_domain)
+        )
+    if not (args.jaccount and args.name):
+        print("error: provide --csv, or both --jaccount and --name", file=sys.stderr)
+        return 2
+    email = args.email or derive_email(args.jaccount, args.email_domain)
     u = user_create(
         session,
         jaccount=args.jaccount,
-        email=args.email,
+        email=email,
         display_name=args.name,
+        student_id=args.student_id,
     )
-    _print_json({"id": str(u.id), "jaccount": u.jaccount, "email": u.email})
+    _print_json(
+        {
+            "id": str(u.id),
+            "jaccount": u.jaccount,
+            "email": u.email,
+            "student_id": u.student_id,
+        }
+    )
+    return 0
 
 
 def _cmd_user_list(session: Session, _args: argparse.Namespace) -> None:
@@ -195,13 +342,16 @@ def _cmd_course_list(session: Session, _args: argparse.Namespace) -> None:
     )
 
 
-def _cmd_enroll(session: Session, args: argparse.Namespace) -> None:
-    e = enroll(
-        session,
-        jaccount=args.user,
-        course_code=args.course,
-        role=Role(args.role),
-    )
+def _cmd_enroll(session: Session, args: argparse.Namespace) -> int:
+    role = Role(args.role)
+    if args.csv:
+        return _emit_batch(
+            batch_enroll(session, read_roster(args.csv), course_code=args.course, role=role)
+        )
+    if not args.user:
+        print("error: provide --csv, or --user", file=sys.stderr)
+        return 2
+    e = enroll(session, jaccount=args.user, course_code=args.course, role=role)
     _print_json(
         {
             "user_id": str(e.user_id),
@@ -209,17 +359,30 @@ def _cmd_enroll(session: Session, args: argparse.Namespace) -> None:
             "role": e.role,
         }
     )
+    return 0
 
 
-def _cmd_token_issue(session: Session, args: argparse.Namespace) -> None:
+def _cmd_token_issue(session: Session, args: argparse.Namespace) -> int:
+    if args.csv:
+        return _emit_batch(batch_token_issue(session, read_roster(args.csv)))
+    if not args.user:
+        print("error: provide --csv, or --user", file=sys.stderr)
+        return 2
     tok, plaintext = token_issue(session, jaccount=args.user)
     # Plaintext shown EXACTLY ONCE — student must save it now.
     _print_json({"plaintext": plaintext, "prefix": tok.prefix, "id": str(tok.id)})
+    return 0
 
 
-def _cmd_token_revoke(session: Session, args: argparse.Namespace) -> None:
+def _cmd_token_revoke(session: Session, args: argparse.Namespace) -> int:
+    if args.csv:
+        return _emit_batch(batch_token_revoke(session, read_roster(args.csv)))
+    if not args.prefix:
+        print("error: provide --csv, or --prefix", file=sys.stderr)
+        return 2
     n = token_revoke(session, prefix=args.prefix)
     _print_json({"revoked": n})
+    return 0
 
 
 def _cmd_token_list(session: Session, args: argparse.Namespace) -> None:
@@ -320,9 +483,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_user = sub.add_parser("user", help="manage users")
     s_user = p_user.add_subparsers(dest="op", required=True)
     p_uc = s_user.add_parser("create")
-    p_uc.add_argument("--jaccount", required=True)
-    p_uc.add_argument("--email", required=True)
-    p_uc.add_argument("--name", required=True)
+    p_uc.add_argument("--jaccount", help="single-user mode")
+    p_uc.add_argument("--email", help="derived as <jaccount>@<domain> if omitted")
+    p_uc.add_argument("--name")
+    p_uc.add_argument("--student-id", dest="student_id", default=None)
+    p_uc.add_argument("--csv", help="roster CSV: name,student_id,jaccount")
+    p_uc.add_argument("--email-domain", dest="email_domain", default=DEFAULT_EMAIL_DOMAIN)
     p_uc.set_defaults(func=_cmd_user_create)
     s_user.add_parser("list").set_defaults(func=_cmd_user_list)
 
@@ -338,19 +504,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     # enroll
     p_enr = sub.add_parser("enroll", help="enroll a user in a course")
-    p_enr.add_argument("--user", required=True, help="user jaccount")
+    p_enr.add_argument("--user", help="user jaccount (single mode)")
     p_enr.add_argument("--course", required=True, help="course code")
     p_enr.add_argument("--role", default="student", choices=["student", "admin"])
+    p_enr.add_argument("--csv", help="roster CSV: name,student_id,jaccount")
     p_enr.set_defaults(func=_cmd_enroll)
 
     # token
     p_tok = sub.add_parser("token", help="manage student tokens")
     s_tok = p_tok.add_subparsers(dest="op", required=True)
     p_ti = s_tok.add_parser("issue")
-    p_ti.add_argument("--user", required=True, help="user jaccount")
+    p_ti.add_argument("--user", help="user jaccount (single mode)")
+    p_ti.add_argument("--csv", help="roster CSV: issue for each jaccount")
     p_ti.set_defaults(func=_cmd_token_issue)
     p_tr = s_tok.add_parser("revoke")
-    p_tr.add_argument("--prefix", required=True, help="8-char prefix shown when issued")
+    p_tr.add_argument("--prefix", help="8-char prefix shown when issued (single mode)")
+    p_tr.add_argument("--csv", help="roster CSV: revoke all active tokens per jaccount")
     p_tr.set_defaults(func=_cmd_token_revoke)
     p_tl = s_tok.add_parser("list")
     p_tl.add_argument("--user", default=None)
@@ -396,13 +565,13 @@ def main(argv: list[str] | None = None) -> int:
 
     with Session(engine) as session:
         if inspect.iscoroutinefunction(args.func):
-            asyncio.run(args.func(session, args))
+            rc = asyncio.run(args.func(session, args))
         else:
-            args.func(session, args)
-    return 0
+            rc = args.func(session, args)
+    return rc if isinstance(rc, int) else 0
 
 
-CURRENT_SCHEMA_REVISION = "b984da6ac5c5"
+CURRENT_SCHEMA_REVISION = "c0a1d2e3f4b5"
 
 
 def _schema_exists(engine) -> bool:  # type: ignore[no-untyped-def]
