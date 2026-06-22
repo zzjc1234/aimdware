@@ -5,7 +5,7 @@ A teaching-team toolkit for monitoring student AI usage in coursework.
 Three components:
 
 - **Backend** (Python/FastAPI/Postgres) — stores per-record metadata + sha256 + jbox URI. Holds no prompt/response content.
-- **LLM client** (Bun single binary) — runs on the student's machine. OpenAI-compatible local API; forwards to a student-configured upstream with the student's own LLM key; uploads the response JSON to the student's jbox via `rclone` over the local Tbox WebDAV endpoint.
+- **LLM client** (Bun single binary) — runs on the student's machine. OpenAI-compatible local API; forwards to a student-configured upstream (the student's own LLM key, or a ChatGPT/Codex or GitHub Copilot subscription); uploads the response JSON to the student's jbox via a WebDAV PUT to the local Tbox endpoint.
 - **Admin script** (`aimdware-admin`, Python CLI) — TT-side tool. Manages users / courses / enrollments / tokens via direct Postgres; fetches blobs from jbox for inspection.
 
 ## Architecture

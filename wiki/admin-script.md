@@ -118,6 +118,8 @@ separate command (TODO).
 ## Deferred
 
 - Course-scoped admin authority (filter commands by `--as <admin>`)
-- `enroll bulk --csv roster.csv`
 - `record verify` that updates `blob_status` after fetching
 - Audit log of who ran which command when
+
+(Roster CSV batch — `user create` / `enroll` / `token issue` / `token revoke`
+with `--csv` — is now implemented; see "Batch over a roster CSV" above.)

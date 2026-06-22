@@ -173,7 +173,6 @@ For "did this student have filesystem access tools":
 
 - **Per-course admin authorization in `/admin/*`.** v1 is a shared
   secret with global read.
-- **Codex / Copilot OAuth upstreams.** Only OpenAI-key style v1.
 - **Session reconstruction across opencode-style orchestrators.** The
   data is captured; UI-level "show me everything for one user task"
   needs heuristics we haven't built.

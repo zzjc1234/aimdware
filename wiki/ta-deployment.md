@@ -68,13 +68,16 @@ CREATE USER aimdware WITH PASSWORD '...';
 CREATE DATABASE aimdware OWNER aimdware;
 ```
 
+**Install a Postgres driver** — the package pins none, so a bare
+`postgresql://…` URL fails to connect. Add psycopg3 and use the matching URL:
+
 ```bash
-export AIMDWARE_DATABASE_URL='postgresql://aimdware:...@localhost:5432/aimdware'
+uv add "psycopg[binary]"
+export AIMDWARE_DATABASE_URL='postgresql+psycopg://aimdware:...@localhost:5432/aimdware'
 ```
 
-> Use a driver SQLAlchemy understands. `postgresql://…` uses the default
-> driver; install/select another (e.g. `postgresql+psycopg://…`) if your
-> environment needs it.
+> (SQLite — the default `sqlite:///./aimdware.db` — needs no extra driver, for
+> a quick local trial only.)
 
 ---
 
