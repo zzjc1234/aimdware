@@ -146,7 +146,15 @@ upstream:
 ```
 
 Codex is a **Responses-only** provider — point clients at
-`/v1/responses` (not `/v1/chat/completions`).
+`/v1/responses` (not `/v1/chat/completions`). Your coding agent (Codex CLI /
+opencode) formats requests correctly; the ChatGPT-account Codex backend only
+accepts models your account exposes (e.g. `gpt-5.5` — *not* `gpt-5-codex`),
+and needs `instructions` + `store:false` + a list `input`.
+
+> **Behind a proxy (e.g. in CN)?** `auth login codex` and every Codex request
+> reach `auth.openai.com` / `chatgpt.com`. Export `HTTPS_PROXY` (only HTTPS, so
+> the plain-HTTP backend stays direct) when you run the login and the router:
+> `HTTPS_PROXY=http://127.0.0.1:<port> ./aimdware-router --config ./aimdware.yaml`
 
 ### 3c. GitHub Copilot subscription
 

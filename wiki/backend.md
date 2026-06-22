@@ -80,7 +80,9 @@ Response shape (both endpoints):
 SQLModel-declared, Alembic-migrated. Schema diagram:
 
 ```
-users(id, jaccount UNIQUE, email UNIQUE, display_name, is_active, ts)
+users(id, jaccount UNIQUE, email UNIQUE, display_name,
+      student_id nullable,             roster 学号; not unique (blanks/dupes ok)
+      is_active, ts)
         ▲
         │
         ├── enrollments(user_id PK, course_id PK, role)
@@ -170,7 +172,13 @@ backend/alembic/versions/
   ad7b66d6bff9_0001_initial_schema.py       full v1 schema + partial unique index
   1cc659f78871_0002_unique_session_turn.py  UNIQUE(session_id, turn_count)
   b984da6ac5c5_0003_add_assignment...py     ADD COLUMN assignment + index
+  c0a1d2e3f4b5_0004_add_student_id.py        ADD COLUMN users.student_id (nullable)
 ```
+
+The admin CLI refuses to run unless the DB is at the latest revision
+(`c0a1d2e3f4b5`), so after pulling new code run `uv run alembic upgrade head`
+**before** restarting the backend — the `User` model references `student_id`,
+which a not-yet-migrated DB lacks.
 
 Apply: `AIMDWARE_DATABASE_URL=... uv run alembic upgrade head`.
 

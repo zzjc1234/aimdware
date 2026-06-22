@@ -67,6 +67,25 @@ opencode's Codex path, so clients should call `/v1/responses`; the
 router deliberately does not send Chat Completions bodies to the Codex
 Responses endpoint.
 
+### Codex (ChatGPT subscription) specifics
+
+The ChatGPT-account Codex backend (`chatgpt.com/backend-api/codex/responses`)
+is strict about the request — a real coding agent (Codex CLI / opencode)
+sends it correctly, but if you call `/v1/responses` by hand, note:
+
+- **model**: codex-only ids like `gpt-5-codex` / `gpt-5` are rejected for
+  ChatGPT accounts ("not supported when using Codex with a ChatGPT account").
+  Use a model your account exposes (e.g. `gpt-5.5`).
+- `input` must be a **list** of messages (not a bare string), `instructions`
+  is **required**, and `store` must be **`false`**. Missing any of these comes
+  back as a `{"detail": "..."}` 4xx from upstream (the router forwards it
+  verbatim and still captures the exchange).
+- **Reaching OpenAI**: `auth login codex` and every refresh/request hit
+  `auth.openai.com` / `chatgpt.com`. Behind a proxy (common in CN), set
+  `HTTPS_PROXY` when running the router and the login — the router honors
+  `HTTPS_PROXY`/`NO_PROXY`. Keep the **plain-HTTP** backend/Tbox direct by
+  setting only `HTTPS_PROXY` (not `HTTP_PROXY`).
+
 ### What the router holds and what it doesn't
 
 | Credential | Where | What it can do |
