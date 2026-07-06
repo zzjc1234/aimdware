@@ -1,0 +1,33 @@
+{
+  "name": "aimdware-llm-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "module": "src/main.ts",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "format": "bun --bun x oxfmt src/",
+    "format:check": "bun --bun x oxfmt --check src/",
+    "lint": "bun --bun x oxlint src/",
+    "dev": "bun run src/main.ts",
+    "build": "bun build --compile --minify --sourcemap src/main.ts --outfile dist/aimdware-router",
+    "build:macos-arm64": "bun build --compile --minify --target=bun-darwin-arm64 src/main.ts --outfile dist/aimdware-router-macos-arm64",
+    "build:macos-x64": "bun build --compile --minify --target=bun-darwin-x64 src/main.ts --outfile dist/aimdware-router-macos-x64",
+    "build:linux-arm64": "bun build --compile --minify --target=bun-linux-arm64 src/main.ts --outfile dist/aimdware-router-linux-arm64",
+    "build:linux-x64": "bun build --compile --minify --target=bun-linux-x64 src/main.ts --outfile dist/aimdware-router-linux-x64",
+    "build:windows-x64": "bun build --compile --minify --target=bun-windows-x64 src/main.ts --outfile dist/aimdware-router-windows-x64.exe",
+    "build:all": "rm -rf dist && bun run build:macos-arm64 && bun run build:macos-x64 && bun run build:linux-arm64 && bun run build:linux-x64 && bun run build:windows-x64"
+  },
+  "dependencies": {
+    "webdav": "^5.10.0",
+    "yaml": "^2.5.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.10",
+    "oxfmt": "^0.49.0",
+    "oxlint": "^1.41.0",
+    "typescript": "^5.6.3"
+  }
+}

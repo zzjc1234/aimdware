@@ -1,0 +1,14 @@
+third_party/
+node_modules/
+dist/
+*.log
+.DS_Store
+
+.*.bun-build
+test-functional/runs/
+test-functional/opencode.json
+
+# Personal runbook — do not commit
+AGENT.md
+.claude/
+.env

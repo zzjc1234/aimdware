@@ -1,0 +1,68 @@
+# aimdware-router config
+#
+# Quickstart:
+#   1. cp aimdware.example.yaml aimdware.yaml
+#   2. fill in the REPLACE_ME values
+#   3. ./aimdware-router --config ./aimdware.yaml
+#
+# Point your tooling (codex / aider / cursor / openai-python / curl ...)
+# at  http://127.0.0.1:<port>/v1/chat/completions  with any api_key.
+#
+# ---- required ----
+
+# Bearer token your TT issued for this course. Treat as a password.
+student_token: REPLACE_ME
+
+# Course code, must match what the TT enrolled you in.
+course: REPLACE_ME
+
+# Assignment label inside that course. Must be the TT-decreed slug
+# for this hw / lab / exam: A-Z, a-z, 0-9, underscore, dot, or hyphen.
+# Every captured conversation will land under this assignment's folder
+# on jbox, so picking the right one is what lets the TT find your work.
+assignment: REPLACE_ME
+
+# Backend URL (TT will tell you).
+backend_url: https://aimdware.example.edu
+
+# Tbox WebDAV gateway — usually a local instance you run yourself,
+# logged into your jbox via jaccount. The router will create a
+# course-scoped folder under here and PUT every captured payload.
+tbox_url: http://127.0.0.1:50471
+tbox_user: REPLACE_ME
+tbox_pass: REPLACE_ME
+
+# Upstream LLM provider. `openai` means any OpenAI-compatible API
+# (OpenAI, OpenRouter, Kimi, GLM, DeepSeek, Qwen, chatanywhere, ...).
+# The router exposes both /v1/chat/completions and /v1/responses and
+# forwards them to this base_url. `codex` is a native Responses provider;
+# point compatible clients at /v1/responses. `copilot` uses local
+# subscription auth. For subscriptions, run:
+#   ./aimdware-router --config ./aimdware.yaml auth login codex
+# or:
+#   ./aimdware-router --config ./aimdware.yaml auth login copilot
+upstream:
+  plugin: openai
+  base_url: https://api.openai.com
+  api_key: sk-REPLACE_ME
+
+# ChatGPT/Codex subscription example:
+# upstream:
+#   plugin: codex
+#
+# GitHub Copilot subscription example:
+# upstream:
+#   plugin: copilot
+
+# ---- optional (defaults shown) ----
+
+# Local port the router listens on. Whatever tool you point at the
+# router uses this.
+# port: 12345
+
+# Where the router stages outbox state + cached blobs. Anything inside
+# is safe to delete; it will be re-fetched from upstream/Tbox as needed.
+# local_cache_dir: ~/.cache/aimdware
+
+# WebDAV path on Tbox. Defaults to "aimdware/<course>".
+# jbox_remote_path: aimdware/ECE4721J

@@ -21,8 +21,17 @@ Under these, no client-side software can guarantee monitoring.
 - **Accidental violations** — students unaware AI use needed disclosure.
 - **Server-side data leaks** — backend stores no content, only
   metadata + hash + URI. A full DB compromise yields no student work.
-  Write-only ingest bounds a stolen course token to writes for one
-  (student, course).
+  Write-only ingest bounds a stolen student token to fake writes for
+  that student's enrolled courses; it can't read anything.
+- **Backend DB leak doesn't leak tokens** — only `sha256(token)` is
+  stored. Tokens are 256-bit random; rainbow tables don't apply. A
+  full DB dump can't be used to impersonate students against a live
+  backend.
+- **Token rotation as the response to client-side leakage.** Plaintext
+  lives in the router's `config.json` (mode 600). If that file is
+  compromised, the only mitigation is `aimdware-admin token rotate`;
+  the leaked token cannot be retroactively scrubbed from the student's
+  machine.
 
 ## What it does NOT protect against
 
@@ -34,6 +43,11 @@ Under these, no client-side software can guarantee monitoring.
   Requires modifying the source.
 - **Self-reported metadata.** Router version, agent client id, model
   string — a modified router can lie. Treat as advisory.
+- **Client-internal tools the router never sees.** If a client (e.g.
+  opencode) does a local Read tool call that mutates context **before**
+  hitting the LLM, the router only sees the result-as-text, not the
+  tool exchange. See [design-notes.md → "What the router does NOT
+  see"](design-notes.md).
 - **Subscription TOS.** If subscription support ever lands, students
   are responsible for compliance with the LLM provider's terms
   (Anthropic's Feb 2026 policy bans third-party OAuth use).

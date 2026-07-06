@@ -1,0 +1,54 @@
+name: client-build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: macos-arm64
+            script: build:macos-arm64
+            artifact: aimdware-router-macos-arm64
+          - os: macos-15
+            target: macos-x64
+            script: build:macos-x64
+            artifact: aimdware-router-macos-x64
+          - os: ubuntu-latest
+            target: linux-arm64
+            script: build:linux-arm64
+            artifact: aimdware-router-linux-arm64
+          - os: ubuntu-latest
+            target: linux-x64
+            script: build:linux-x64
+            artifact: aimdware-router-linux-x64
+
+    defaults:
+      run:
+        working-directory: llm-client
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run typecheck
+
+      - run: bun test
+
+      - run: bun run ${{ matrix.script }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: llm-client/dist/${{ matrix.artifact }}
+          if-no-files-found: error
