@@ -1,321 +1,301 @@
-# Student setup — step by step
+# Student Deployment Guide
 
-This walks you from nothing to a working router capturing a **demo
-assignment** end to end:
+This guide is for students: download `aimdware-router`, configure Tbox/jBox, create one config file per assignment, start the router, and confirm uploaded records in jBox.
 
-1. what your TA gives you
-2. get the `aimdware-router` binary
-3. install + configure **Tbox** (your jBox WebDAV gateway)
-4. pick your upstream LLM
-5. write `aimdware.yaml`
-6. start the router and verify it's healthy
-7. point your coding agent at it
-8. run the demo assignment and confirm a capture landed
-9. troubleshooting
+## 0. Required Information
 
-> The router is a **visibility tool**, not enforcement. It runs on your
-> own machine with your own credentials. See
-> [threat-model.md](threat-model.md).
+Project links:
 
----
+1. [TboxWebdav](https://github.com/1357310795/TboxWebdav)
+2. [aimdware GitHub release](https://github.com/zzjc1234/aimdware/releases/tag/v0.1.0)
 
-## 0. What your TA gives you
+Your TA will give you these values:
 
-Before you start, get these four values from your TA (out of band — Feishu/email):
-
-| Value | Example | Used as |
-|---|---|---|
-| Student token | `st_9aBx…` | `student_token` — treat as a password |
+| Name | Example | Used as |
+| --- | --- | --- |
+| Student token | `st_...` | `student_token`; keep it private |
 | Backend URL | `https://aimdware.example.edu` | `backend_url` |
-| Course code | `DEMO101` | `course` |
-| Assignment slug | `demo1` | `assignment` (chars: `A–Z a–z 0–9 _ . -`) |
+| Course code | `ECE4721J` | `course` |
+| Assignment slug | `hw1`, `lab2`, `project` | `assignment` |
 
-The token is minted per student (`aimdware-admin token issue`). If it
-ever leaks, ask your TA to rotate it.
+`course` and `assignment` may only contain English letters, digits, underscores, dots, and hyphens. Do not use Chinese characters, spaces, or slashes.
 
----
+## 1. Download Router
 
-## 1. Get the router binary
+After release, open the GitHub release page and download the latest version:
 
-**Option A — download a prebuilt binary** (no toolchain needed). Grab the
-one for your platform and rename it to `aimdware-router`:
-
+```text
+https://github.com/zzjc1234/aimdware/releases
 ```
-aimdware-router-macos-arm64      # Apple Silicon
-aimdware-router-macos-x64        # Intel Mac
-aimdware-router-linux-arm64
-aimdware-router-linux-x64
-aimdware-router-windows-x64.exe
-```
+
+Put the downloaded file in a stable directory:
 
 ```bash
-chmod +x aimdware-router            # macOS/Linux
+mkdir -p ~/aimdware
+
+# If you downloaded the Release binary:
+mv ~/Downloads/aimdware-router-macos-arm64 ~/aimdware/aimdware-router
+
+cd ~/aimdware
+chmod +x ./aimdware-router
 ./aimdware-router --help
 ```
 
-> macOS Gatekeeper may block an unsigned binary. If so:
-> `xattr -d com.apple.quarantine ./aimdware-router`.
-
-**Option B — build from source** (needs [Bun](https://bun.sh) ≥ 1.3):
+On macOS, if Gatekeeper blocks the downloaded binary, run:
 
 ```bash
-cd llm-client
-bun install
-bun run build                 # → dist/aimdware-router (current platform)
-# or all platforms at once:
-bun run build:all             # → dist/aimdware-router-<platform>
-./dist/aimdware-router --help
+xattr -d com.apple.quarantine ./aimdware-router
 ```
 
-Pick a working directory and keep the binary + your `aimdware.yaml`
-together there.
+## 2. Configure Tbox and jBox
 
----
+The router does not store your conversation content itself. It uploads captured JSON files to your own jBox through Tbox.
 
-## 2. Install and configure Tbox (your WebDAV target)
+1. Open jBox: `https://jbox.sjtu.edu.cn`
+2. Download and install the Tbox desktop client.
+3. Sign in to Tbox with jAccount.
+4. Find the WebDAV/local service settings in Tbox.
+5. Note these three values:
 
-The router never stores your conversations itself — it **PUTs** each
-captured blob to a WebDAV endpoint **you** control. The reference setup
-is **jBox via Tbox**: Tbox runs a small local WebDAV server backed by
-your jBox cloud storage.
-
-> **Not at SJTU / no jBox?** Any WebDAV server works (NextCloud, a
-> self-hosted `webdav-server`, minio + a WebDAV frontend …). Skip to the
-> three values you need at the end of this section and plug in your own
-> endpoint.
-
-### 2.1 Download and sign in
-
-1. Open the jBox portal: **https://jbox.sjtu.edu.cn**.
-2. Download the **Tbox** desktop client for your OS and install it.
-3. Launch it and sign in with **jAccount**.
-
-### 2.2 Turn on the local WebDAV endpoint
-
-In Tbox's settings, find the **WebDAV / local mount** section and note
-three things (labels vary by Tbox version):
-
-| You need | Goes into | Typical value |
-|---|---|---|
+| Tbox value | Config field | Example |
+| --- | --- | --- |
 | Local WebDAV URL | `tbox_url` | `http://127.0.0.1:50471` |
-| WebDAV username | `tbox_user` | your jAccount, e.g. `alice` |
-| WebDAV password / app token | `tbox_pass` | the token Tbox shows |
+| WebDAV username | `tbox_user` | `admin` |
+| User token | `tbox_pass` | `UserToken` in the Tbox config |
 
-> The port differs per machine/version — use whatever Tbox displays, not
-> the example above.
+Use the port shown by your own Tbox. Do not blindly copy the example port.
 
-### 2.3 Verify WebDAV is reachable
-
-With Tbox running, this should return `200`/`207` (not "connection
-refused"). Replace the URL/creds with yours:
+Use `demo.sh` to test Tbox:
 
 ```bash
-curl -u alice:<tbox_pass> -X PROPFIND http://127.0.0.1:50471/ -I
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE="${TBOX_URL:-http://127.0.0.1:50471}"
+USER="${TBOX_USER:-admin}"
+TOKEN="${TBOX_USER_TOKEN:-}"
+
+if [ -z "$TOKEN" ]; then
+  printf "Tbox UserToken: " >&2
+  stty -echo
+  read -r TOKEN
+  stty echo
+  printf "\n" >&2
+fi
+
+DIR="aimdware-test-$(date +%s)"
+FILE="$(mktemp)"
+trap 'rm -f "$FILE"' EXIT
+
+printf ok > "$FILE"
+
+echo "1. Check WebDAV root"
+curl -fsS -u "$USER:$TOKEN" -H "Depth: 0" -X PROPFIND "$BASE/" >/dev/null
+
+echo "2. Create test directory: $DIR"
+curl -fsS -u "$USER:$TOKEN" -X MKCOL "$BASE/$DIR" >/dev/null
+
+echo "3. Upload probe.txt"
+curl -fsS -u "$USER:$TOKEN" -T "$FILE" "$BASE/$DIR/probe.txt" >/dev/null
+
+echo "4. Read probe.txt"
+curl -fsS -u "$USER:$TOKEN" "$BASE/$DIR/probe.txt"
+printf "\n"
+
+echo "5. Delete probe.txt"
+curl -fsS -u "$USER:$TOKEN" -X DELETE "$BASE/$DIR/probe.txt" >/dev/null
+
+echo "6. Delete test directory"
+curl -fsS -u "$USER:$TOKEN" -X DELETE "$BASE/$DIR" >/dev/null
+
+echo "Tbox WebDAV check passed"
 ```
 
-You do **not** need to pre-create any folders — the router creates
-`aimdware/<course>/<assignment>/` automatically (MKCOL) on first upload.
+Run it with:
 
----
+```bash
+TBOX_USER_TOKEN=<Your-TBOX_USER_TOKEN> bash demo.sh
+```
 
-## 3. Pick your upstream LLM
+Replace `Your-TBOX_USER_TOKEN` with the top-level `UserToken` in your Tbox config. If the script passes, Tbox is reachable and upload works. `connection refused` usually means Tbox is not running or the port is wrong.
 
-Choose **one** of these. It decides the `upstream:` block in step 5.
+## 3. Create a Config File
 
-### 3a. An OpenAI-compatible API (key-based)
+Create `aimdware.hw1.yaml` in `~/aimdware`:
 
-Anything that speaks the OpenAI API: the SJTU models gateway, OpenAI,
-OpenRouter, DeepSeek, Kimi, GLM, Qwen, … You supply a `base_url` and
-`api_key`.
+```yaml
+student_token: st_REPLACE_ME
+course: ECE4721J
+assignment: hw1
+backend_url: http://111.186.57.145:4312
+
+tbox_url: http://127.0.0.1:50471
+tbox_user: admin
+tbox_pass: TBOX_USER_TOKEN
+
+upstream:
+  plugin: openai
+  base_url: https://models.sjtu.edu.cn/api/v1
+  api_key: sk_REPLACE_ME
+
+# Optional; default is 12345.
+# port: 12345
+
+# Optional; default upload path is aimdware/<course>/<assignment>.
+# Do not set jbox_remote_path manually unless you know why; a mismatch fails startup.
+```
+
+The config file contains tokens and passwords. Restrict its permissions:
+
+```bash
+chmod 600 aimdware.hw1.yaml
+```
+
+### HTTP/HTTPS Rules
+
+Use these rules. Do not mix them up:
+
+| Config field | Typical value | Notes |
+| --- | --- | --- |
+| `backend_url` | `https://...` or `http://...` | Use what your TA gives you. Production usually uses HTTPS; test/internal deployments may use HTTP. |
+| `tbox_url` | `http://127.0.0.1:<port>` | Tbox runs a local WebDAV service on your own computer, usually over HTTP. |
+| `upstream.base_url` | `https://...` | SJTU/OpenAI/DeepSeek and other online model gateways usually use HTTPS. |
+| `OPENAI_BASE_URL` | `http://127.0.0.1:12345/v1` | Your AI tool connects to the local router over HTTP. |
+
+If your upstream model is a local service, such as Ollama or a local OpenAI-compatible gateway, HTTP is fine:
 
 ```yaml
 upstream:
   plugin: openai
-  base_url: https://models.sjtu.edu.cn/api/v1
-  api_key: sk-...
+  base_url: http://127.0.0.1:11434/v1
+  api_key: dummy
 ```
 
-### 3b. ChatGPT / Codex subscription (no API key)
+If you need a proxy for HTTPS upstreams or Codex login, set only `HTTPS_PROXY`:
 
-Uses your ChatGPT login instead of a key. Log in once (see step 6.1) and
-set:
+```bash
+export HTTPS_PROXY=http://127.0.0.1:7890
+./aimdware-router --config ./aimdware.hw1.yaml
+```
+
+Usually do not set `HTTP_PROXY`. The local router and Tbox both use `http://127.0.0.1`, so keeping them direct is simplest.
+
+If you use a ChatGPT/Codex subscription instead of an API key, replace `upstream` with:
 
 ```yaml
 upstream:
   plugin: codex
 ```
 
-Codex is a **Responses-only** provider — point clients at
-`/v1/responses` (not `/v1/chat/completions`). Your coding agent (Codex CLI /
-opencode) formats requests correctly; the ChatGPT-account Codex backend only
-accepts models your account exposes (e.g. `gpt-5.5` — *not* `gpt-5-codex`),
-and needs `instructions` + `store:false` + a list `input`.
+Then log in once:
 
-> **Behind a proxy (e.g. in CN)?** `auth login codex` and every Codex request
-> reach `auth.openai.com` / `chatgpt.com`. Export `HTTPS_PROXY` (only HTTPS, so
-> the plain-HTTP backend stays direct) when you run the login and the router:
-> `HTTPS_PROXY=http://127.0.0.1:<port> ./aimdware-router --config ./aimdware.yaml`
+```bash
+./aimdware-router --config ./aimdware.hw1.yaml auth login codex
+./aimdware-router --config ./aimdware.hw1.yaml auth status
+```
 
-### 3c. GitHub Copilot subscription
+## 4. Create Configs for Multiple Assignments
+
+Use one config file per assignment. Usually only `assignment` changes.
+
+```bash
+cp aimdware.hw1.yaml aimdware.hw2.yaml
+```
+
+Change this in `aimdware.hw2.yaml`:
 
 ```yaml
-upstream:
-  plugin: copilot
+assignment: hw1
 ```
 
-For 3b/3c the tokens live in `local_cache_dir/auth/auth.json`, **not** in
-`aimdware.yaml`.
-
----
-
-## 4. Write `aimdware.yaml`
-
-Create `aimdware.yaml` next to the binary. Full annotated example for the
-demo assignment using an OpenAI-compatible upstream:
+to:
 
 ```yaml
-# --- identity (from your TA) ---
-student_token: st_REPLACE_ME
-course: DEMO101
-assignment: demo1
-backend_url: https://aimdware.example.edu
-
-# --- upstream LLM (pick ONE block from step 3) ---
-upstream:
-  plugin: openai
-  base_url: https://models.sjtu.edu.cn/api/v1
-  api_key: sk-REPLACE_ME
-
-# --- WebDAV target (from Tbox, step 2) ---
-tbox_url: http://127.0.0.1:50471
-tbox_user: REPLACE_ME
-tbox_pass: REPLACE_ME
-
-# --- optional (defaults shown) ---
-# port: 12345                       # where the router listens
-# local_cache_dir: ~/.cache/aimdware
-# jbox_remote_path: aimdware/DEMO101/demo1   # must equal aimdware/<course>/<assignment>
+assignment: hw2
 ```
 
-Lock the file down — it holds secrets:
+Recommended names:
+
+```text
+aimdware.hw1.yaml
+aimdware.hw2.yaml
+aimdware.lab1.yaml
+aimdware.project.yaml
+```
+
+Start the router with the config for the assignment you are working on. Do not keep using the `hw1` config while working on `hw2`, or files will upload to the wrong directory.
+
+## 5. Startup Checklist
+
+Before starting each assignment, check:
+
+1. Tbox is signed in and its WebDAV local service is running.
+2. The `assignment` field in the config matches the current assignment.
+3. Start the router:
 
 ```bash
-chmod 600 aimdware.yaml
+cd ~/aimdware
+./aimdware-router --config ./aimdware.hw1.yaml
 ```
 
----
+You should see output like:
 
-## 5. (Codex/Copilot only) log in
+```text
+aimdware-router listening on http://127.0.0.1:12345
+  course:      ECE4721J
+  backend:     https://aimdware.example.edu
+  tbox:        http://127.0.0.1:50471
+```
 
-Skip if you chose 3a. Otherwise run the one-time device login:
+In another terminal, check health:
 
 ```bash
-./aimdware-router --config ./aimdware.yaml auth login codex
-#   → opens https://auth.openai.com/codex/device, enter the printed code
-./aimdware-router --config ./aimdware.yaml auth login copilot   # for copilot
-
-./aimdware-router --config ./aimdware.yaml auth status
-#   codex: logged in token=…        (redacted)
+curl -s http://127.0.0.1:12345/healthz
 ```
 
-The access token auto-refreshes; you won't normally log in again.
+If it returns `ok`, the router is running.
 
----
+## 6. Point Your AI Tool at the Router
 
-## 6. Start the router and verify
-
-```bash
-./aimdware-router --config ./aimdware.yaml
-```
-
-On startup it prints a config summary (port, upstream, cache dir). In a
-second terminal, confirm it's up:
-
-```bash
-curl -s http://127.0.0.1:12345/healthz        # → 200
-```
-
-Quick forward test (OpenAI-compatible upstreams):
-
-```bash
-curl -s http://127.0.0.1:12345/v1/chat/completions \
-  -H 'content-type: application/json' \
-  -H 'authorization: Bearer anything' \
-  -d '{"model":"<a model your upstream offers>",
-       "messages":[{"role":"user","content":"say hi"}]}'
-```
-
-You should get a normal completion back. The router listens on loopback
-only and accepts **any** non-empty `api_key` from your agent — the real
-upstream credential is the one in `aimdware.yaml`.
-
----
-
-## 7. Point your coding agent at the router
-
-Set your agent's base URL to the router and use any dummy key. Examples:
-
-**OpenAI SDK / generic env:**
+Set your AI tool's OpenAI base URL to the local router:
 
 ```bash
 export OPENAI_BASE_URL=http://127.0.0.1:12345/v1
 export OPENAI_API_KEY=dummy
 ```
 
-**Codex / Responses clients** (when `plugin: codex`): point them at
-`http://127.0.0.1:12345/v1/responses`.
+`OPENAI_API_KEY` can be any non-empty value. The real upstream credential is `upstream.api_key` in the config file, or your logged-in Codex token.
 
-Whatever tool you use (Cline, Aider, OpenCode, Cursor, curl, …), the
-rule is the same: **base URL → the router, key → anything**.
+If you use `plugin: codex`, the tool must call the Responses API:
 
----
+```text
+http://127.0.0.1:12345/v1/responses
+```
 
-## 8. Run the demo assignment and confirm capture
+## 7. Confirm Upload
 
-1. Make sure **Tbox is running** and the router is up (steps 2, 6).
-2. Do one real model call through your agent (or the curl in step 6).
-3. Watch the router log — you'll see a line like:
+After one real model call, the router terminal should print a line like:
 
-   ```
-   captured record=… session=… turn=1 hash=…… size=… -> queued
-   ```
+```text
+captured record=... session=... turn=1 hash=... size=... -> queued
+```
 
-4. Confirm the local blob exists:
+After a few seconds, open jBox or Tbox and check:
 
-   ```bash
-   ls ~/.cache/aimdware/records/        # one <session_id>.json
-   ```
+```text
+aimdware/<course>/<assignment>/
+```
 
-5. Confirm it reached jBox — the file appears under:
+For example:
 
-   ```
-   aimdware/DEMO101/demo1/<session_id>.json
-   ```
+```text
+aimdware/ECE4721J/hw1/
+```
 
-   (visible in jBox/Tbox; the router PUTs it via WebDAV).
+You should see a file like:
 
-6. Your TA can now see the metadata + fetch the blob for `DEMO101/demo1`.
+```text
+<session_id>.json
+```
 
-A multi-turn conversation collapses into **one** session file that is
-overwritten each turn — that's expected (see
-[design-notes.md](design-notes.md)).
-
----
-
-## 9. Troubleshooting
-
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| `failed to read config at …` | wrong `--config` path | use the correct path / `cd` to the dir |
-| Config validation error on `api_key` | `plugin: openai` needs `api_key` | add it, or switch to `codex`/`copilot` |
-| `jbox_remote_path must be aimdware/<course>/<assignment>` | overrode it with a non-canonical value | delete the override or match exactly |
-| `Codex subscription is not logged in` | no/expired login | `auth login codex` |
-| `Codex … refresh rejected … run auth login codex` | refresh token revoked | `auth login codex` again |
-| Captures stay queued, never upload | Tbox down / wrong `tbox_*` | start Tbox; re-check URL/user/pass (step 2.3) |
-| `does not support /v1/chat/completions` | `plugin: codex` got a Chat request | call `/v1/responses` instead |
-| Agent calls fail with 4xx | wrong upstream `base_url`/model | verify with the step 6 curl |
-
-Cache files in `local_cache_dir` are safe to delete; they're rebuilt
-from upstream/Tbox as needed. The SQLite outbox retries across restarts,
-so a backend or Tbox outage loses no data — captures upload once the
-endpoint is back.
+A multi-turn conversation usually stays in one session file. Later turns overwrite it with the latest complete state. This is expected.
