@@ -29,6 +29,7 @@ export function createAnthropicProvider(
       const headers = new Headers(input.headers);
       headers.delete("authorization");
       headers.delete("x-api-key");
+      headers.set("authorization", `Bearer ${config.api_key}`);
       headers.set("x-api-key", config.api_key);
       if (!headers.has("anthropic-version")) {
         headers.set("anthropic-version", "2023-06-01");

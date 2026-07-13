@@ -305,7 +305,7 @@ test("proxyMessages forwards Anthropic bytes with configured credentials", async
   expect(recorded).toHaveLength(1);
   expect(recorded[0]!.url).toBe(`${baseUrl}/v1/messages`);
   expect(recorded[0]!.body).toBe(body);
-  expect(recorded[0]!.headers.authorization).toBeUndefined();
+  expect(recorded[0]!.headers.authorization).toBe("Bearer sk-ant");
   expect(recorded[0]!.headers["x-api-key"]).toBe("sk-ant");
   expect(recorded[0]!.headers["anthropic-version"]).toBe("2025-01-01");
   expect(await res.text()).toContain("message_start");

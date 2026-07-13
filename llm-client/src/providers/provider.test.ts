@@ -250,7 +250,7 @@ test("anthropic provider uses its configured key and Messages endpoint", async (
   expect(prepared.url.toString()).toBe(
     "https://gateway.example/api/v1/messages?beta=true",
   );
-  expect(prepared.headers.get("authorization")).toBeNull();
+  expect(prepared.headers.get("authorization")).toBe("Bearer sk-ant");
   expect(prepared.headers.get("x-api-key")).toBe("sk-ant");
   expect(prepared.headers.get("anthropic-version")).toBe("2023-06-01");
 
