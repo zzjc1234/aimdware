@@ -5,7 +5,6 @@ import { fetchWithProxy, userAgent } from "./plugin";
 
 const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const CODEX_ISSUER = "https://auth.openai.com";
-const COPILOT_CLIENT_ID = "Ov23li8tweQw6odWQebz";
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3000;
 
 type LoginOpts = {
@@ -126,91 +125,6 @@ export async function loginCodexDevice(opts: LoginOpts): Promise<OAuthAuth> {
     if (response.status !== 403 && response.status !== 404) {
       throw new Error(`Codex authorization polling failed: ${response.status}`);
     }
-    await d.sleep(interval * 1000 + OAUTH_POLLING_SAFETY_MARGIN_MS);
-  }
-}
-
-export async function loginCopilotDevice(
-  opts: LoginOpts & { enterpriseUrl?: string },
-): Promise<OAuthAuth> {
-  const d = defaults(opts);
-  const domain = opts.enterpriseUrl
-    ? opts.enterpriseUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")
-    : "github.com";
-  const deviceUrl = `https://${domain}/login/device/code`;
-  const tokenUrl = `https://${domain}/login/oauth/access_token`;
-  const deviceResponse = await fetchWithProxy(d.fetchImpl, deviceUrl, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      "User-Agent": userAgent(),
-    },
-    body: JSON.stringify({
-      client_id: COPILOT_CLIENT_ID,
-      scope: "read:user",
-    }),
-  });
-  if (!deviceResponse.ok) {
-    throw new Error(
-      `GitHub Copilot device authorization failed: ${deviceResponse.status}`,
-    );
-  }
-
-  const deviceData = (await deviceResponse.json()) as {
-    verification_uri: string;
-    user_code: string;
-    device_code: string;
-    interval: number;
-  };
-  d.notify(`Open ${deviceData.verification_uri}`);
-  d.notify(`Enter code: ${deviceData.user_code}`);
-
-  while (true) {
-    const response = await fetchWithProxy(d.fetchImpl, tokenUrl, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "User-Agent": userAgent(),
-      },
-      body: JSON.stringify({
-        client_id: COPILOT_CLIENT_ID,
-        device_code: deviceData.device_code,
-        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-      }),
-    });
-    if (!response.ok) {
-      throw new Error(
-        `GitHub Copilot token polling failed: ${response.status}`,
-      );
-    }
-
-    const data = (await response.json()) as {
-      access_token?: string;
-      error?: string;
-      interval?: number;
-    };
-    if (data.access_token) {
-      const auth: OAuthAuth = {
-        type: "oauth",
-        access: data.access_token,
-        refresh: data.access_token,
-        expires: 0,
-        ...(opts.enterpriseUrl ? { enterprise_url: domain } : {}),
-      };
-      await d.authStore.set("copilot", auth);
-      return auth;
-    }
-    if (data.error && data.error !== "authorization_pending") {
-      if (data.error !== "slow_down") {
-        throw new Error(`GitHub Copilot authorization failed: ${data.error}`);
-      }
-    }
-    const interval =
-      data.error === "slow_down"
-        ? (data.interval ?? deviceData.interval + 5)
-        : deviceData.interval;
     await d.sleep(interval * 1000 + OAUTH_POLLING_SAFETY_MARGIN_MS);
   }
 }

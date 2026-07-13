@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { loginCodexDevice, loginCopilotDevice } from "./auth-login";
+import { loginCodexDevice } from "./auth-login";
 import type { AuthStore, ProviderAuth } from "./auth-store";
 import type { FetchLike } from "../http/proxy";
 
@@ -242,73 +242,4 @@ test("loginCodexDevice gives up once the device code expires instead of polling 
       notify: () => {},
     }),
   ).rejects.toThrow(/auth login codex/);
-});
-
-test("loginCopilotDevice stores GitHub Copilot oauth credentials", async () => {
-  const store = memoryStore();
-  const prompts: string[] = [];
-  const fetchImpl: FetchLike = async (input) => {
-    const url = String(input);
-    if (url.endsWith("/login/device/code")) {
-      return Response.json({
-        verification_uri: "https://github.com/login/device",
-        user_code: "WXYZ-1234",
-        device_code: "device-code",
-        interval: 1,
-      });
-    }
-    return Response.json({ access_token: "gho-token" });
-  };
-
-  await loginCopilotDevice({
-    authStore: store,
-    fetchImpl,
-    sleep: async () => {},
-    notify: (line) => prompts.push(line),
-  });
-
-  expect(prompts.join("\n")).toContain("https://github.com/login/device");
-  expect(prompts.join("\n")).toContain("WXYZ-1234");
-  expect(store.values.get("copilot")).toEqual({
-    type: "oauth",
-    access: "gho-token",
-    refresh: "gho-token",
-    expires: 0,
-  });
-});
-
-test("loginCopilotDevice sends auth requests through HTTPS_PROXY", async () => {
-  const originalProxy = snapshotProxyEnv();
-  process.env.HTTPS_PROXY = "http://127.0.0.1:10870";
-  const store = memoryStore();
-  const calls: Array<RequestInit & { proxy?: string }> = [];
-  const fetchImpl: FetchLike = async (input, init) => {
-    calls.push((init ?? {}) as RequestInit & { proxy?: string });
-    const url = String(input);
-    if (url.endsWith("/login/device/code")) {
-      return Response.json({
-        verification_uri: "https://github.com/login/device",
-        user_code: "WXYZ-1234",
-        device_code: "device-code",
-        interval: 1,
-      });
-    }
-    return Response.json({ access_token: "gho-token" });
-  };
-
-  try {
-    await loginCopilotDevice({
-      authStore: store,
-      fetchImpl,
-      sleep: async () => {},
-      notify: () => {},
-    });
-  } finally {
-    restoreProxyEnv(originalProxy);
-  }
-
-  expect(calls.map((call) => call.proxy)).toEqual([
-    "http://127.0.0.1:10870",
-    "http://127.0.0.1:10870",
-  ]);
 });

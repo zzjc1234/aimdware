@@ -8,7 +8,7 @@ import { createHandler } from "./http/handler";
 import { startServer } from "./http/server";
 import { authFilePath, createFileAuthStore } from "./providers/auth-store";
 import type { AuthStore } from "./providers/auth-store";
-import { loginCodexDevice, loginCopilotDevice } from "./providers/auth-login";
+import { loginCodexDevice } from "./providers/auth-login";
 import { createProvider } from "./providers";
 import { IngestQueue } from "./outbox/queue";
 import {
@@ -53,14 +53,13 @@ export function extractMessages(requestBytes: Uint8Array): Message[] {
 async function runAuthCommand(
   positionals: string[],
   authStore: AuthStore,
-  enterpriseUrl: string | undefined,
 ): Promise<boolean> {
   if (positionals[0] !== "auth") return false;
   const action = positionals[1];
   const provider = positionals[2];
 
   if (action === "status") {
-    for (const id of ["codex", "copilot"] as const) {
+    for (const id of ["codex"] as const) {
       const auth = await authStore.get(id);
       if (!auth) {
         console.log(`${id}: not logged in`);
@@ -79,14 +78,8 @@ async function runAuthCommand(
     return true;
   }
 
-  if (action === "login" && provider === "copilot") {
-    await loginCopilotDevice({ authStore, enterpriseUrl });
-    console.log("copilot: logged in");
-    return true;
-  }
-
   throw new Error(
-    "unknown auth command; expected `auth status`, `auth login codex`, or `auth login copilot`",
+    "unknown auth command; expected `auth status` or `auth login codex`",
   );
 }
 
@@ -175,7 +168,6 @@ async function main() {
     options: {
       config: { type: "string", short: "c", default: "./aimdware.yaml" },
       help: { type: "boolean", short: "h" },
-      "enterprise-url": { type: "string" },
     },
     allowPositionals: true,
   });
@@ -187,7 +179,6 @@ Usage:
   aimdware-router --config <path>          start the router
   aimdware-router --config <path> auth status
   aimdware-router --config <path> auth login codex
-  aimdware-router --config <path> auth login copilot [--enterprise-url <domain>]
   aimdware-router --help                   show this message
 
 The config file is a YAML doc. See aimdware.example.yaml for the
@@ -214,9 +205,7 @@ expected fields (student_token, course, backend_url, tbox_*, upstream).`);
   const authStore = createFileAuthStore(authFilePath(cacheDir));
 
   try {
-    if (
-      await runAuthCommand(positionals, authStore, values["enterprise-url"])
-    ) {
+    if (await runAuthCommand(positionals, authStore)) {
       return;
     }
   } catch (e) {

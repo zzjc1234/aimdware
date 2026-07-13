@@ -9,8 +9,8 @@ const SlugSchema = z
 
 const UpstreamSchema = z
   .object({
-    type: z.enum(["openai", "codex", "copilot"]).optional(),
-    plugin: z.enum(["openai", "codex", "copilot"]).optional(),
+    type: z.enum(["openai", "codex", "anthropic"]).optional(),
+    plugin: z.enum(["openai", "codex", "anthropic"]).optional(),
     base_url: z.string().optional(),
     api_key: z.string().optional(),
     model: z.string().optional(),
@@ -28,7 +28,7 @@ const UpstreamSchema = z
       });
     }
     const plugin = value.plugin ?? value.type ?? "openai";
-    if (plugin === "openai" && !value.api_key) {
+    if (plugin !== "codex" && !value.api_key) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["api_key"],
@@ -42,7 +42,11 @@ const UpstreamSchema = z
       ...value,
       type: plugin,
       plugin,
-      base_url: value.base_url ?? "https://api.openai.com",
+      base_url:
+        value.base_url ??
+        (plugin === "anthropic"
+          ? "https://api.anthropic.com"
+          : "https://api.openai.com"),
       api_key: value.api_key,
     };
   });

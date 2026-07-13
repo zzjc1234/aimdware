@@ -1,7 +1,7 @@
 import type { FetchLike } from "../http/proxy";
 import { getProxyForUrl } from "../http/net";
 
-export type ProviderId = "openai" | "codex" | "copilot";
+export type ProviderId = "openai" | "codex" | "anthropic";
 
 export type ProviderPrepareInput = {
   inboundUrl: URL;
@@ -22,6 +22,9 @@ export type ProviderRuntime = {
   label: string;
   prepareChat(input: ProviderPrepareInput): Promise<ProviderPreparedRequest>;
   prepareResponses(
+    input: ProviderPrepareInput,
+  ): Promise<ProviderPreparedRequest>;
+  prepareMessages?(
     input: ProviderPrepareInput,
   ): Promise<ProviderPreparedRequest>;
 };

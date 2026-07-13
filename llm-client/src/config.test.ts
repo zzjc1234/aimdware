@@ -121,8 +121,8 @@ backend_url: https://b.example
   expect(config.upstream.type).toBe("openai");
 });
 
-test("loadConfig parses subscription plugins without an api_key", () => {
-  for (const plugin of ["codex", "copilot"] as const) {
+test("loadConfig parses the Codex subscription plugin without an api_key", () => {
+  for (const plugin of ["codex"] as const) {
     const yaml = `
 student_token: st_x
 course: ECE4721J
@@ -144,24 +144,28 @@ student_token: st_x
 course: ECE4721J
 assignment: hw1
 upstream:
-  type: copilot
+  type: anthropic
+  api_key: sk-ant-test
 backend_url: https://b.example
 `;
   const config = loadConfig(yaml);
-  expect(config.upstream.plugin).toBe("copilot");
-  expect(config.upstream.type).toBe("copilot");
+  expect(config.upstream.plugin).toBe("anthropic");
+  expect(config.upstream.type).toBe("anthropic");
+  expect(config.upstream.base_url).toBe("https://api.anthropic.com");
 });
 
-test("loadConfig rejects api-key OpenAI upstreams without an api_key", () => {
-  const yaml = `
+test("loadConfig rejects api-key providers without an api_key", () => {
+  for (const plugin of ["openai", "anthropic"] as const) {
+    const yaml = `
 student_token: st_x
 course: ECE4721J
 assignment: hw1
 upstream:
-  plugin: openai
+  plugin: ${plugin}
 backend_url: https://b.example
 `;
-  expect(() => loadConfig(yaml)).toThrow("upstream.api_key is required");
+    expect(() => loadConfig(yaml)).toThrow("upstream.api_key is required");
+  }
 });
 
 test("loadConfig rejects conflicting upstream.type and upstream.plugin", () => {
@@ -171,7 +175,8 @@ course: ECE4721J
 assignment: hw1
 upstream:
   type: codex
-  plugin: copilot
+  plugin: anthropic
+  api_key: sk-ant-test
 backend_url: https://b.example
 `;
   expect(() => loadConfig(yaml)).toThrow(

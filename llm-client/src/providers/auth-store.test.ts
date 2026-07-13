@@ -34,17 +34,6 @@ test("del removes a stored provider entry", async () => {
   expect(await store.get("codex")).toBeUndefined();
 });
 
-test("del leaves other providers intact", async () => {
-  const store = createFileAuthStore(freshAuthPath());
-  await store.set("codex", { type: "oauth", refresh: "rc", expires: 0 });
-  await store.set("copilot", { type: "oauth", refresh: "rp", expires: 0 });
-
-  await store.del("codex");
-
-  expect(await store.get("codex")).toBeUndefined();
-  expect(await store.get("copilot")).toBeDefined();
-});
-
 test("auth.json is written owner-only (0600) inside a 0700 directory", async () => {
   const path = freshAuthPath();
   const store = createFileAuthStore(path);
@@ -120,14 +109,13 @@ test("withLock steals a stale lock left behind by a crashed process", async () =
   expect(ran).toBe(true);
 });
 
-test("concurrent set calls do not lose provider entries", async () => {
+test("concurrent set calls preserve the provider credential", async () => {
   const store = createFileAuthStore(freshAuthPath());
 
   await Promise.all([
     store.set("codex", { type: "oauth", refresh: "rc", expires: 0 }),
-    store.set("copilot", { type: "oauth", refresh: "rp", expires: 0 }),
+    store.set("codex", { type: "oauth", refresh: "rp", expires: 0 }),
   ]);
 
   expect(await store.get("codex")).toBeDefined();
-  expect(await store.get("copilot")).toBeDefined();
 });

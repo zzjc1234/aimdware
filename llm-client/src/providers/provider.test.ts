@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { proxyChat, proxyResponses, type FetchLike } from "../http/proxy";
+import { createAnthropicProvider } from "./anthropic";
 import { createCodexProvider, extractCodexAccountId } from "./codex";
-import { createCopilotProvider } from "./copilot";
 import { userAgent } from "./plugin";
 import type { AuthStore, ProviderAuth } from "./auth-store";
 
@@ -72,7 +72,7 @@ function authStore(initial: ProviderAuth): AuthStore {
   let value: ProviderAuth | undefined = initial;
   return {
     async get(id) {
-      expect(["codex", "copilot"]).toContain(id);
+      expect(["codex"]).toContain(id);
       return value;
     },
     async set(_id, next) {
@@ -232,90 +232,35 @@ test("codex provider rejects Chat Completions instead of sending the wrong proto
   ).rejects.toThrow("does not support /v1/chat/completions");
 });
 
-test("copilot provider targets GitHub Copilot and adds subscription headers", async () => {
-  const store = authStore({
-    type: "oauth",
-    access: "gho-access",
-    refresh: "gho-access",
-    expires: 0,
+test("anthropic provider uses its configured key and Messages endpoint", async () => {
+  const provider = createAnthropicProvider({
+    base_url: "https://gateway.example/api",
+    api_key: "sk-ant",
   });
-  const upstreamCalls: Array<{ url: string; headers: Record<string, string> }> =
-    [];
-  const upstreamFetch: FetchLike = async (input, init) => {
-    const headers: Record<string, string> = {};
-    new Headers(init?.headers).forEach((value, key) => {
-      headers[key] = value;
-    });
-    upstreamCalls.push({
-      url: input instanceof URL ? input.toString() : String(input),
-      headers,
-    });
-    return new Response('{"ok":true}', { status: 200 });
-  };
-
-  await proxyChat(
-    new Request("http://router-local/v1/chat/completions", {
-      method: "POST",
-      body: JSON.stringify({
-        model: "gpt-5.1-codex",
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "describe this" },
-              { type: "image_url", image_url: { url: "data:image/png,..." } },
-            ],
-          },
-        ],
-      }),
+  const prepared = await provider.prepareMessages!({
+    inboundUrl: new URL("http://router-local/v1/messages?beta=true"),
+    method: "POST",
+    headers: new Headers({
+      authorization: "Bearer client-key",
+      "x-api-key": "client-key",
     }),
-    createCopilotProvider({ authStore: store }),
-    { fetchImpl: upstreamFetch },
-  );
-
-  expect(upstreamCalls).toHaveLength(1);
-  expect(upstreamCalls[0]!.url).toBe(
-    "https://api.githubcopilot.com/v1/chat/completions",
-  );
-  expect(upstreamCalls[0]!.headers.authorization).toBe("Bearer gho-access");
-  expect(upstreamCalls[0]!.headers["openai-intent"]).toBe("conversation-edits");
-  expect(upstreamCalls[0]!.headers["x-initiator"]).toBe("user");
-  expect(upstreamCalls[0]!.headers["copilot-vision-request"]).toBe("true");
-});
-
-test("copilot provider marks agent-initiated chat requests", async () => {
-  const store = authStore({
-    type: "oauth",
-    access: "gho-access",
-    refresh: "gho-access",
-    expires: 0,
+    body: new TextEncoder().encode('{"model":"claude"}').buffer,
   });
-  const upstreamCalls: Array<{ headers: Record<string, string> }> = [];
-  const upstreamFetch: FetchLike = async (_input, init) => {
-    const headers: Record<string, string> = {};
-    new Headers(init?.headers).forEach((value, key) => {
-      headers[key] = value;
-    });
-    upstreamCalls.push({ headers });
-    return new Response('{"ok":true}', { status: 200 });
-  };
 
-  await proxyChat(
-    new Request("http://router-local/v1/chat/completions", {
-      method: "POST",
-      body: JSON.stringify({
-        model: "gpt-5.1-codex",
-        messages: [
-          { role: "user", content: "start" },
-          { role: "assistant", content: "working" },
-        ],
-      }),
-    }),
-    createCopilotProvider({ authStore: store }),
-    { fetchImpl: upstreamFetch },
+  expect(prepared.url.toString()).toBe(
+    "https://gateway.example/api/v1/messages?beta=true",
   );
+  expect(prepared.headers.get("authorization")).toBeNull();
+  expect(prepared.headers.get("x-api-key")).toBe("sk-ant");
+  expect(prepared.headers.get("anthropic-version")).toBe("2023-06-01");
 
-  expect(upstreamCalls[0]!.headers["x-initiator"]).toBe("agent");
+  const versioned = await provider.prepareMessages!({
+    inboundUrl: new URL("http://router-local/v1/messages"),
+    method: "POST",
+    headers: new Headers({ "anthropic-version": "2025-01-01" }),
+    body: undefined,
+  });
+  expect(versioned.headers.get("anthropic-version")).toBe("2025-01-01");
 });
 
 test("codex refresh is single-flight under concurrent expired requests", async () => {
