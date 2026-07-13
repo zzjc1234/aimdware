@@ -1,6 +1,7 @@
 import { captureChat, type CaptureResult } from "../recording/capture";
 import {
   proxyChat,
+  proxyMessages,
   proxyResponses,
   type FetchLike,
   type UpstreamConfig,
@@ -34,6 +35,10 @@ export function createHandler(opts: HandlerOpts): RequestHandler {
       return handleProviderErrors(() => handleResponses(req, opts));
     }
 
+    if (req.method === "POST" && url.pathname === "/v1/messages") {
+      return handleProviderErrors(() => handleMessages(req, opts));
+    }
+
     return new Response("not found", { status: 404 });
   };
 }
@@ -65,6 +70,17 @@ async function handleResponses(
 ): Promise<Response> {
   return handleCaptured(req, opts, (proxyReq) =>
     proxyResponses(proxyReq, opts.upstream, {
+      fetchImpl: opts.fetchImpl,
+    }),
+  );
+}
+
+async function handleMessages(
+  req: Request,
+  opts: HandlerOpts,
+): Promise<Response> {
+  return handleCaptured(req, opts, (proxyReq) =>
+    proxyMessages(proxyReq, opts.upstream, {
       fetchImpl: opts.fetchImpl,
     }),
   );

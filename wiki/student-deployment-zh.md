@@ -191,6 +191,17 @@ upstream:
 ./aimdware-router --config ./aimdware.hw1.yaml auth status
 ```
 
+如果你使用 Anthropic-compatible API，则把该 router 实例配置为：
+
+```yaml
+upstream:
+  plugin: anthropic
+  base_url: https://api.anthropic.com
+  api_key: sk-ant-REPLACE_ME
+```
+
+Anthropic-compatible 客户端应连接到 `http://127.0.0.1:12345/v1/messages`。
+
 ## 4. 为多个作业准备配置
 
 每个作业一个配置文件，主要只改 `assignment`。

@@ -1,6 +1,12 @@
 import { test, expect, afterEach, beforeEach } from "bun:test";
 import type { Server } from "bun";
-import { proxyChat, proxyResponses, type FetchLike } from "./proxy";
+import {
+  proxyChat,
+  proxyMessages,
+  proxyResponses,
+  type FetchLike,
+} from "./proxy";
+import { createAnthropicProvider } from "../providers/anthropic";
 
 beforeEach(() => {
   delete process.env.HTTP_PROXY;
@@ -271,4 +277,36 @@ test("proxyResponses forwards Responses API requests to OpenAI-compatible upstre
   const fwd = JSON.parse(recorded[0]!.body);
   expect(fwd.model).toBe("gpt-5");
   expect(fwd.input[0].content).toBe("hi");
+});
+
+test("proxyMessages forwards Anthropic bytes with configured credentials", async () => {
+  const { baseUrl } = await startFakeUpstream(
+    () =>
+      new Response('event: message_start\ndata: {"type":"message_start"}\n\n', {
+        headers: { "content-type": "text/event-stream" },
+      }),
+  );
+  const body =
+    '{"model":"claude-sonnet","max_tokens":1,"messages":[{"role":"user","content":"hi"}],"stream":true}';
+
+  const res = await proxyMessages(
+    new Request("http://localhost/v1/messages", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer client-key",
+        "x-api-key": "client-key",
+        "anthropic-version": "2025-01-01",
+      },
+      body,
+    }),
+    createAnthropicProvider({ base_url: baseUrl, api_key: "sk-ant" }),
+  );
+
+  expect(recorded).toHaveLength(1);
+  expect(recorded[0]!.url).toBe(`${baseUrl}/v1/messages`);
+  expect(recorded[0]!.body).toBe(body);
+  expect(recorded[0]!.headers.authorization).toBeUndefined();
+  expect(recorded[0]!.headers["x-api-key"]).toBe("sk-ant");
+  expect(recorded[0]!.headers["anthropic-version"]).toBe("2025-01-01");
+  expect(await res.text()).toContain("message_start");
 });

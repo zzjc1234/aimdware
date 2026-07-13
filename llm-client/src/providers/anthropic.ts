@@ -1,5 +1,8 @@
-import type { ProviderRuntime } from "./plugin";
-import { openAICompatibleUrl } from "./plugin";
+import {
+  openAICompatibleUrl,
+  UnsupportedProviderProtocolError,
+  type ProviderRuntime,
+} from "./plugin";
 
 export type AnthropicProviderConfig = {
   base_url: string;
@@ -13,12 +16,14 @@ export function createAnthropicProvider(
     id: "anthropic",
     label: "Anthropic-compatible API",
     async prepareChat() {
-      throw new Error(
+      throw new UnsupportedProviderProtocolError(
         "provider anthropic does not support /v1/chat/completions",
       );
     },
     async prepareResponses() {
-      throw new Error("provider anthropic does not support /v1/responses");
+      throw new UnsupportedProviderProtocolError(
+        "provider anthropic does not support /v1/responses",
+      );
     },
     async prepareMessages(input) {
       const headers = new Headers(input.headers);

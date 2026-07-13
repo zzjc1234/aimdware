@@ -194,6 +194,17 @@ Then log in once:
 ./aimdware-router --config ./aimdware.hw1.yaml auth status
 ```
 
+If you use an Anthropic-compatible API, configure that router instance with:
+
+```yaml
+upstream:
+  plugin: anthropic
+  base_url: https://api.anthropic.com
+  api_key: sk-ant-REPLACE_ME
+```
+
+Point Anthropic-compatible clients at `http://127.0.0.1:12345/v1/messages`.
+
 ## 4. Create Configs for Multiple Assignments
 
 Use one config file per assignment. Usually only `assignment` changes.

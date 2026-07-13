@@ -5,8 +5,9 @@
 #   2. fill in the REPLACE_ME values
 #   3. ./aimdware-router --config ./aimdware.yaml
 #
-# Point your tooling (codex / aider / cursor / openai-python / curl ...)
-# at  http://127.0.0.1:<port>/v1/chat/completions  with any api_key.
+# Point OpenAI-compatible tooling (codex / aider / cursor / openai-python / curl ...)
+# at http://127.0.0.1:<port>/v1/chat/completions. Anthropic-compatible tooling
+# uses http://127.0.0.1:<port>/v1/messages.
 #
 # ---- required ----
 
@@ -34,13 +35,9 @@ tbox_pass: REPLACE_ME
 
 # Upstream LLM provider. `openai` means any OpenAI-compatible API
 # (OpenAI, OpenRouter, Kimi, GLM, DeepSeek, Qwen, chatanywhere, ...).
-# The router exposes both /v1/chat/completions and /v1/responses and
-# forwards them to this base_url. `codex` is a native Responses provider;
-# point compatible clients at /v1/responses. `copilot` uses local
-# subscription auth. For subscriptions, run:
+# `anthropic` forwards /v1/messages; `openai` forwards both OpenAI paths;
+# `codex` is a native Responses provider. For Codex subscriptions, run:
 #   ./aimdware-router --config ./aimdware.yaml auth login codex
-# or:
-#   ./aimdware-router --config ./aimdware.yaml auth login copilot
 upstream:
   plugin: openai
   base_url: https://api.openai.com
@@ -50,9 +47,11 @@ upstream:
 # upstream:
 #   plugin: codex
 #
-# GitHub Copilot subscription example:
+# Anthropic-compatible API example:
 # upstream:
-#   plugin: copilot
+#   plugin: anthropic
+#   base_url: https://api.anthropic.com
+#   api_key: sk-ant-REPLACE_ME
 
 # ---- optional (defaults shown) ----
 

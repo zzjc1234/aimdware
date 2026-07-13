@@ -1,8 +1,8 @@
 # LLM client
 
 Single binary on the student's machine. Sits between the coding agent
-and an upstream that may speak either OpenAI Chat Completions or OpenAI
-Responses. Three things happen per model call, all off the student's
+and an upstream that may speak OpenAI Chat Completions, OpenAI Responses, or
+Anthropic Messages. Three things happen per model call, all off the student's
 critical path:
 
 1. **forward** the request to upstream, stream the response back to the
@@ -20,9 +20,9 @@ student_token: st_... # one per student; TT hands it directly
 course: ECE4721J # course code slug; sent with every ingest call
 assignment: hw1 # TT-decreed slug; A-Z/a-z/0-9/_.-
 upstream:
-  plugin: openai # openai, codex, or copilot; `type` remains an alias
+  plugin: openai # openai, codex, or anthropic; `type` remains an alias
   base_url: https://models.sjtu.edu.cn/api/v1
-  api_key: sk-... # required only for openai-compatible API providers
+  api_key: sk-... # required for openai and anthropic API providers
 port: 12345 # router listens here
 local_cache_dir: ~/.cache/aimdware # outbox + blob cache
 backend_url: https://aimdware.example.edu
@@ -34,22 +34,29 @@ tbox_pass: <password or app token>
 # jbox_remote_path: aimdware/ECE4721J/hw1
 ```
 
-For ChatGPT/Codex or GitHub Copilot subscription routing, log in once
-and switch the plugin:
+For ChatGPT/Codex subscription routing, log in once and switch the plugin:
 
 ```bash
 aimdware-router --config ./aimdware.yaml auth login codex
-aimdware-router --config ./aimdware.yaml auth login copilot
 aimdware-router --config ./aimdware.yaml auth status
 ```
 
 ```yaml
 upstream:
-  plugin: codex # or copilot
+  plugin: codex
 ```
 
 The subscription tokens are stored in `local_cache_dir/auth/auth.json`
 (a dedicated 0700 dir, file 0600), not in `aimdware.yaml`.
+
+For an Anthropic-compatible upstream, configure one router instance with:
+
+```yaml
+upstream:
+  plugin: anthropic
+  base_url: https://api.anthropic.com
+  api_key: sk-ant-...
+```
 
 ## API surface
 
@@ -58,6 +65,7 @@ The router exposes both modern OpenAI API shapes:
 ```text
 POST /v1/chat/completions
 POST /v1/responses
+POST /v1/messages
 ```
 
 `plugin: openai` forwards both paths to the configured `base_url`, so
@@ -66,6 +74,10 @@ they support. `plugin: codex` is a native Responses provider matching
 opencode's Codex path, so clients should call `/v1/responses`; the
 router deliberately does not send Chat Completions bodies to the Codex
 Responses endpoint.
+
+`plugin: anthropic` accepts `/v1/messages` and forwards that protocol
+unchanged to its configured `base_url`. It supplies `x-api-key` from the
+router configuration and defaults `anthropic-version` to `2023-06-01`.
 
 ### Codex (ChatGPT subscription) specifics
 
@@ -91,8 +103,8 @@ sends it correctly, but if you call `/v1/responses` by hand, note:
 | Credential | Where | What it can do |
 |---|---|---|
 | `student_token` | `aimdware.yaml`, mode 600 | POST to backend `/ingest/*` |
-| `upstream.api_key` | same file, only for `plugin: openai` | call the student's chosen LLM provider |
-| subscription OAuth tokens | `local_cache_dir/auth/auth.json`, only for `plugin: codex/copilot` | call that student's subscription provider |
+| `upstream.api_key` | same file, only for `plugin: openai` or `plugin: anthropic` | call the student's chosen LLM provider |
+| subscription OAuth tokens | `local_cache_dir/auth/auth.json`, only for `plugin: codex` | call the student's subscription provider |
 | `tbox_user`/`tbox_pass` | same file | PUT to the student's chosen WebDAV |
 | **NOT held**: backend admin secret, TT credentials, other students' data |
 

@@ -89,8 +89,9 @@ TODO; see [admin-script.md](admin-script.md).
 | Router | Bun (compiled single binary per OS) |
 | Admin CLI | Python, ships with backend package |
 
-Wire format is OpenAI Chat Completions only. Subscription auth (Codex,
-Copilot) and Anthropic-format inbound are not in scope for v1.
+The router supports OpenAI Chat Completions and Responses, plus Anthropic
+Messages when `plugin: anthropic` is selected. Codex subscription auth is
+available when `plugin: codex` is selected.
 
 ## Key design choices
 

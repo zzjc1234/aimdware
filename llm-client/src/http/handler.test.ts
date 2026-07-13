@@ -3,6 +3,7 @@ import type { Server } from "bun";
 import { createHandler } from "./handler";
 import type { CaptureResult } from "../recording/capture";
 import { createCodexProvider } from "../providers/codex";
+import { createAnthropicProvider } from "../providers/anthropic";
 import type { AuthStore } from "../providers/auth-store";
 
 let fakeUpstream: Server<unknown> | undefined;
@@ -117,6 +118,68 @@ test("POST /v1/responses forwards Responses API request to upstream", async () =
   expect(await res.text()).toBe('{"id":"resp_x"}');
   expect(JSON.parse(seen.body).input[0].content).toBe("hi");
   expect(seen.auth).toBe("Bearer sk-upstream");
+});
+
+test("POST /v1/messages forwards and captures Anthropic responses", async () => {
+  const seen: { body: string; key: string | null } = { body: "", key: null };
+  const { baseUrl } = startFakeUpstream(async (req) => {
+    seen.body = await req.text();
+    seen.key = req.headers.get("x-api-key");
+    return new Response(
+      'event: message_start\ndata: {"type":"message_start"}\n\n',
+      {
+        headers: { "content-type": "text/event-stream" },
+      },
+    );
+  });
+  let captured: CaptureResult | undefined;
+  let resolveCapture!: () => void;
+  const captureDone = new Promise<void>((resolve) => {
+    resolveCapture = resolve;
+  });
+  const handler = createHandler({
+    upstream: createAnthropicProvider({ base_url: baseUrl, api_key: "sk-ant" }),
+    onCapture: (result) => {
+      captured = result;
+      resolveCapture();
+    },
+  });
+  const body =
+    '{"model":"claude-sonnet","max_tokens":1,"messages":[{"role":"user","content":"hi"}],"stream":true}';
+
+  const res = await handler(
+    new Request("http://localhost/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    }),
+  );
+
+  expect(res.status).toBe(200);
+  expect(await res.text()).toContain("message_start");
+  await captureDone;
+  expect(seen.body).toBe(body);
+  expect(seen.key).toBe("sk-ant");
+  expect(new TextDecoder().decode(captured!.request_bytes)).toBe(body);
+  expect(new TextDecoder().decode(captured!.response_bytes)).toContain(
+    "message_start",
+  );
+});
+
+test("POST /v1/messages returns 400 for providers without Messages support", async () => {
+  const handler = createHandler({
+    upstream: createCodexProvider({ authStore: loggedInCodexStore }),
+  });
+
+  const res = await handler(
+    new Request("http://localhost/v1/messages", {
+      method: "POST",
+      body: '{"model":"claude","max_tokens":1,"messages":[]}',
+    }),
+  );
+
+  expect(res.status).toBe(400);
+  expect(await res.text()).toContain("does not support /v1/messages");
 });
 
 test("POST /v1/chat/completions returns 400 for Responses-only providers", async () => {

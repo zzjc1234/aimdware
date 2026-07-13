@@ -1,6 +1,9 @@
 import { getProxyForUrl } from "./net";
 import { createOpenAIProvider } from "../providers/openai";
-import type { ProviderRuntime } from "../providers/plugin";
+import {
+  UnsupportedProviderProtocolError,
+  type ProviderRuntime,
+} from "../providers/plugin";
 
 export type UpstreamConfig = {
   base_url: string;
@@ -45,10 +48,18 @@ export async function proxyResponses(
   return proxyPrepared(inbound, upstream, "responses", opts);
 }
 
+export async function proxyMessages(
+  inbound: Request,
+  upstream: UpstreamConfig | ProviderRuntime,
+  opts: ProxyChatOpts = {},
+): Promise<Response> {
+  return proxyPrepared(inbound, upstream, "messages", opts);
+}
+
 async function proxyPrepared(
   inbound: Request,
   upstream: UpstreamConfig | ProviderRuntime,
-  protocol: "chat" | "responses",
+  protocol: "chat" | "responses" | "messages",
   opts: ProxyChatOpts,
 ): Promise<Response> {
   const inboundUrl = new URL(inbound.url);
@@ -67,7 +78,16 @@ async function proxyPrepared(
   const provider =
     "prepareChat" in upstream ? upstream : createOpenAIProvider(upstream);
   const prepare =
-    protocol === "chat" ? provider.prepareChat : provider.prepareResponses;
+    protocol === "chat"
+      ? provider.prepareChat
+      : protocol === "responses"
+        ? provider.prepareResponses
+        : provider.prepareMessages;
+  if (!prepare) {
+    throw new UnsupportedProviderProtocolError(
+      `provider ${provider.id} does not support /v1/messages`,
+    );
+  }
   const prepared = await prepare({
     inboundUrl,
     method: inbound.method,
